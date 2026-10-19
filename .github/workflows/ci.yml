@@ -64,9 +64,11 @@ jobs:
           PY
       - name: Smoke-test built wheel in a clean environment
         run: |
-          python -m venv /tmp/pick-wheel-check
-          /tmp/pick-wheel-check/bin/python -m pip install --no-deps dist/*.whl
-          /tmp/pick-wheel-check/bin/pick --help
+          wheel_venv="/tmp/pick-wheel-check-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "$wheel_venv"
+          python -m venv "$wheel_venv"
+          "$wheel_venv/bin/python" -m pip install --no-deps --force-reinstall dist/*.whl
+          "$wheel_venv/bin/pick" --help
       - name: Verify CLI and demo
         run: |
           pick --help
