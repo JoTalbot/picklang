@@ -74,8 +74,8 @@ async def amain() -> int:
               f"воркер pid={worker_pid} в другом процессе, результат: {result}")
         return 0 if ok else 1
     except Exception as e:
-        print(f"SKIP: {type(e).__name__}: {str(e)[:200]}")
-        return 0
+        print(f"FAIL: {type(e).__name__}: {str(e)[:500]}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
