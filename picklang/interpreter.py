@@ -80,6 +80,11 @@ class _State:
         return result
 
 
+def resolve_secrets(value):
+    """Публичная точка подстановки `secret:NAME` (см. _resolve_secrets)."""
+    return _resolve_secrets(value)
+
+
 def _resolve_secrets(value):
     if isinstance(value, str) and value.startswith("secret:"):
         name = value[len("secret:"):]
@@ -134,7 +139,10 @@ def _call(expr, env, registry, hook, trace, state: _State, piped=...):
     args = [_eval(a, env, registry, hook, trace, state) for a in arg_exprs]
     if piped is not ...:
         args = [piped] + args
-    if state.resolve_secrets:
+    # При durable-исполнении секрет подставляет исполнитель ПЕРЕД вызовом
+    # обработчика: переигрывание уже завершённого шага не должно требовать
+    # переменных окружения, которых к моменту resume может уже не быть.
+    if state.resolve_secrets and hook is None:
         args = [_resolve_secrets(a) for a in args]
     fn = registry.get(name)
     if fn is None:
