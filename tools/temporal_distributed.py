@@ -58,8 +58,8 @@ async def amain() -> int:
             try:
                 line = proc.stdout.readline() if proc.stdout else ""
                 if "worker ready" not in line:
-                    print(f"SKIP: воркер не поднялся: {line[:200]}")
-                    return 0
+                    print(f"FAIL: воркер не поднялся: {line[:200]}", file=sys.stderr)
+                    return 1
                 worker_pid = int(line.split("pid=")[1].strip())
                 ir = compile_ir(src)
                 handle = await env.client.start_workflow(
