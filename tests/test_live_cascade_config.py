@@ -33,3 +33,9 @@ def test_provider_quota_errors_trip_circuit_breaker(message):
 
 def test_non_quota_errors_do_not_trip_circuit_breaker():
     assert not is_provider_rate_limit("invalid response from model")
+
+
+def test_groq_defaults_use_supported_model_ids(monkeypatch):
+    monkeypatch.setenv("PICK_LIVE_PROVIDER", "groq")
+    monkeypatch.delenv("PICK_LIVE_MODEL_TIERS", raising=False)
+    assert load_model_tiers() == [["openai/gpt-oss-20b"], ["openai/gpt-oss-120b"]]
