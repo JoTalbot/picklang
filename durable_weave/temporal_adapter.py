@@ -6,7 +6,8 @@ PICK не меняется: та же программа (тот же IR, тот
   @wait signal         -> workflow.wait_condition + @workflow.signal
   ? guard -> fail      -> ApplicationError (non-retryable)
   компенсации !        -> выполняются workflow-кодом в обратном порядке
-Локальный executor остаётся для тестов и офлайна; Temporal — для прода.
+Локальный executor — базовый путь без внешней инфраструктуры; Temporal — опциональный backend
+для долгих/распределённых процессов, когда нужен отдельный Temporal Service.
 """
 from __future__ import annotations
 
