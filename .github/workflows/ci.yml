@@ -22,7 +22,7 @@ concurrency:
 jobs:
   tests:
     name: Unit tests and package checks
-    runs-on: [self-hosted, linux, x64]
+    runs-on: [self-hosted, linux, arm64]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +42,7 @@ jobs:
   live-openrouter:
     name: Live OpenRouter cascade
     if: github.event_name == 'workflow_dispatch' && inputs.run_live
-    runs-on: [self-hosted, linux, x64]
+    runs-on: [self-hosted, linux, arm64]
     timeout-minutes: 25
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_TOKEN }}
