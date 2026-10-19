@@ -3,18 +3,18 @@ name: PICK CI and live OpenRouter eval
 on:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
     inputs:
       run_live:
-        description: "Run the live OpenRouter cascade (uses OPENROUTER_TOKEN; free-tier models)"
+        description: "Run the live OpenRouter cascade (uses OPENROUTER_TOKEN)"
         required: false
-        default: false
+        default: true
         type: boolean
 
 permissions:
   contents: read
 
+# One active run per ref. New commits cancel older runs instead of queuing stale work.
 concurrency:
   group: testing-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -22,10 +22,26 @@ concurrency:
 jobs:
   tests:
     name: Unit tests and package checks
+    if: github.repository == 'JoTalbot/testing' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, linux, arm64]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Reject stale or untrusted run
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REPOSITORY" != "JoTalbot/testing" || "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Only JoTalbot/testing on main is allowed to use this self-hosted runner."
+            exit 1
+          fi
+          latest_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          if [[ -z "$latest_sha" || "$GITHUB_SHA" != "$latest_sha" ]]; then
+            echo "::error::Stale workflow: this run is not for the current main commit."
+            exit 1
+          fi
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -41,13 +57,29 @@ jobs:
 
   live-openrouter:
     name: Live OpenRouter cascade
-    if: github.event_name == 'workflow_dispatch' && inputs.run_live
+    needs: tests
+    if: >-
+      github.repository == 'JoTalbot/testing' &&
+      github.ref == 'refs/heads/main' &&
+      needs.tests.result == 'success' &&
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_live))
     runs-on: [self-hosted, linux, arm64]
     timeout-minutes: 25
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Reject stale run before using API quota
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          if [[ "$GITHUB_REPOSITORY" != "JoTalbot/testing" || "$GITHUB_REF" != "refs/heads/main" || -z "$latest_sha" || "$GITHUB_SHA" != "$latest_sha" ]]; then
+            echo "::error::Refusing live API calls from an untrusted or stale workflow run."
+            exit 1
+          fi
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -55,6 +87,7 @@ jobs:
       - name: Install package
         run: python -m pip install --upgrade pip && python -m pip install -e .
       - name: Validate secret is configured
+        shell: bash
         run: |
           if [ -z "$OPENROUTER_API_KEY" ]; then
             echo "::error::Repository secret OPENROUTER_TOKEN is missing or empty."
@@ -64,16 +97,22 @@ jobs:
         run: python eval_live_cascade.py --timeout 45 --write
       - name: Print concise results
         if: always()
+        shell: bash
         run: |
           if [ -f bench/live_cascade_results.json ]; then
             python - <<'PY'
           import json
           from pathlib import Path
+
           rows = json.loads(Path("bench/live_cascade_results.json").read_text(encoding="utf-8"))
           for row in rows:
-              print(f"{row.get('task')}: {'PASS' if row.get('ok') else 'FAIL'} "
-                    f"tier={row.get('tier')} model={row.get('model')} "
-                    f"attempts={row.get('attempts')} seconds={row.get('seconds')}")
-          print(f"TOTAL: {sum(bool(r.get('ok')) for r in rows)}/{len(rows)}")
+              print(
+                  f"{row.get('task')}: {'PASS' if row.get('ok') else 'FAIL'} "
+                  f"tier={row.get('tier')} model={row.get('model')} "
+                  f"attempts={row.get('attempts')} seconds={row.get('seconds')}"
+              )
+          print(f"TOTAL: {sum(bool(row.get('ok')) for row in rows)}/{len(rows)}")
           PY
+          else
+            echo "No live result file was produced."
           fi
