@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: true
+          persist-credentials: false
       - name: Reject stale or untrusted run
         shell: bash
         run: |
@@ -97,7 +97,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: true
+          persist-credentials: false
       - name: Reject stale run before using API quota
         shell: bash
         run: |
