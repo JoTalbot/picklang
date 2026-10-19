@@ -10,6 +10,7 @@
 """
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -80,6 +81,29 @@ def make_validator(task):
     return valid
 
 
+def load_model_tiers(raw: str | None = None):
+    """Read optional JSON model tiers from PICK_LIVE_MODEL_TIERS, else use free defaults."""
+    raw = os.environ.get("PICK_LIVE_MODEL_TIERS") if raw is None else raw
+    if not raw:
+        return [["liquid/lfm-2.5-2.6b:free", "poolside/laguna-xs-2.1:free"],
+                ["nvidia/nemotron-3-super-120b-a12b:free", "google/gemma-4-31b-it:free"]]
+    try:
+        tiers = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("PICK_LIVE_MODEL_TIERS must be valid JSON") from exc
+    if (not isinstance(tiers, list) or not tiers or
+            any(not isinstance(tier, list) or not tier or
+                any(not isinstance(model, str) or not model.strip() for model in tier)
+                for tier in tiers)):
+        raise ValueError("PICK_LIVE_MODEL_TIERS must be a non-empty JSON array of non-empty model arrays")
+    return tiers
+
+
+def is_provider_rate_limit(error: object) -> bool:
+    text = str(error).lower()
+    return "429" in text or "rate limit" in text or "quota exceeded" in text
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--key-file")
@@ -89,20 +113,29 @@ def main():
     args = ap.parse_args()
     key = load_key(args.key_file)
 
-    tiers = [["liquid/lfm-2.5-2.6b:free", "poolside/laguna-xs-2.1:free"],
-             ["nvidia/nemotron-3-super-120b-a12b:free", "google/gemma-4-31b-it:free"]]
+    try:
+        tiers = load_model_tiers()
+    except ValueError as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        return 2
     results = []
+    quota_blocked = None
     for task in TASKS:
         prompt = GRAMMAR + f"\nФункции хоста: {', '.join(task['tools'])}\nВход: {list(task['inputs'])}\nЗадача: {task['task']}\n"
         cascade = ModelCascade(tiers, per_model_timeout=args.timeout)
         t0 = time.time()
         row = {"task": task["name"], "ok": False, "tier": None, "model": None,
                "attempts": 0, "seconds": 0.0, "prompt_tokens": 0, "completion_tokens": 0}
-        try:
-            res = cascade.run(key, [{"role": "user", "content": prompt}], make_validator(task))
-            row.update(ok=True, tier=res["tier"], model=res["model"])
-        except Exception as e:
-            row["error"] = str(e)[:200]
+        if quota_blocked:
+            row["error"] = f"not attempted: provider quota/rate limit already reached ({quota_blocked})"
+        else:
+            try:
+                res = cascade.run(key, [{"role": "user", "content": prompt}], make_validator(task))
+                row.update(ok=True, tier=res["tier"], model=res["model"])
+            except Exception as e:
+                row["error"] = str(e)[:200]
+                if is_provider_rate_limit(e):
+                    quota_blocked = str(e)[:120]
         row["seconds"] = round(time.time() - t0, 1)
         row["attempts"] = len(cascade.log)
         for entry in cascade.log:
