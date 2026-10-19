@@ -42,6 +42,54 @@ const UI = (function () {
     img.alt = "Иллюстрация сцены";
   }
 
+  /* ── Плашка поверх арта ────────────────────────────────
+     Здесь на картинке видно: где ты сейчас (состояние)
+     и какие есть ходы. Это не «нарисованный» текст, а живой слой —
+     он пересчитывается после каждого твоего решения. */
+  function renderOverlay(scene, state, visibleChoices, onChoice) {
+    const romans = ["", "Глава I", "Глава II", "Глава III"];
+    $("ov-chapter").textContent = romans[state.chapter] || "Глава";
+
+    /* Строка состояния: сцена + что важно про сейчас */
+    const status = $("ov-status");
+    const line = (typeof scene.status === "function") ? scene.status(state) : scene.status;
+    status.innerHTML = line || defaultStatus(scene, state);
+
+    /* Ходы: короткие «чипы», по ним тоже можно нажимать */
+    const box = $("ov-choices");
+    box.innerHTML = "";
+    visibleChoices.forEach(function (choice, i) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "ov-chip";
+      const num = document.createElement("span");
+      num.className = "num";
+      num.textContent = (i + 1);
+      chip.appendChild(num);
+      chip.appendChild(document.createTextNode(shortLabel(choice.label)));
+      chip.addEventListener("click", function (e) {
+        e.stopPropagation();
+        onChoice(choice);
+      });
+      box.appendChild(chip);
+    });
+  }
+
+  /* Состояние по умолчанию: если у сцены не написано своё */
+  function defaultStatus(scene, state) {
+    const items = state.items.length ? state.items.join(", ") : "пусто";
+    const decisions = state.log ? state.log.length : 0;
+    return "<b>" + (scene.title || "") + "</b> · сумка: " + items +
+           " · решений: " + decisions;
+  }
+
+  /* Короткая подпись для чипа: длинные фразы не влезают на картинку */
+  function shortLabel(text) {
+    let t = String(text).replace(/[«»"]/g, "").trim();
+    if (t.length > 34) t = t.slice(0, 32).trim() + "…";
+    return t;
+  }
+
   /* ── Текст сцены ──────────────────────────────────────── */
   function renderText(scene, state) {
     $("scene-title").textContent = scene.title || "";
@@ -173,6 +221,7 @@ const UI = (function () {
     showScreen: showScreen,
     renderTopbar: renderTopbar,
     renderArt: renderArt,
+    renderOverlay: renderOverlay,
     renderText: renderText,
     renderChoices: renderChoices,
     showCheck: showCheck,

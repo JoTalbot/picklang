@@ -52,6 +52,14 @@
     <main class="scene" id="scene">
       <figure class="art-wrap hidden" id="art-wrap">
         <img id="art" class="art" alt="">
+        <!-- «Плашка» прямо на арте: где ты сейчас и какие есть ходы -->
+        <div class="art-overlay">
+          <div class="ov-top"><span id="ov-chapter" class="ov-chapter"></span></div>
+          <div class="ov-bottom">
+            <div class="ov-status" id="ov-status"></div>
+            <div class="ov-choices" id="ov-choices"></div>
+          </div>
+        </div>
       </figure>
       <h2 id="scene-title" class="scene-title"></h2>
       <div id="scene-text" class="scene-text"></div>

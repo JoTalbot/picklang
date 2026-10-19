@@ -78,6 +78,9 @@ function makeDocument() {
       el._tag = tag;
       return el;
     },
+    createTextNode(text) {
+      return { _tag: "text", textContent: text, children: [] };
+    },
     querySelectorAll(sel) {
       // панели навыков/сумки/дневника
       return [makePanel("skills"), makePanel("bag"), makePanel("log")];

@@ -167,6 +167,59 @@ body::before {
   animation: fadein .5s ease both;
 }
 .art { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; }
+
+/* ── плашка на арте: «где ты сейчас» и «какие есть ходы» ──
+   Сделана кодом, а не нарисована на картинке: так текст всегда
+   читаемый, всегда на русском и меняется вместе с твоими решениями. */
+.art-wrap { position: relative; }
+.art-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 8px 10px;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, #0b0f14d9 0%, #0b0f1400 22%),
+    linear-gradient(0deg, #0b0f14f2 0%, #0b0f14b8 34%, #0b0f1400 62%);
+}
+.ov-top { display: flex; justify-content: flex-start; }
+.ov-chapter {
+  font-size: 9.5px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #ffd9a0;
+  text-shadow: 0 1px 3px #000;
+}
+.ov-bottom { display: flex; flex-direction: column; gap: 6px; }
+.ov-status {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #cfe0ec;
+  text-shadow: 0 1px 4px #000, 0 0 8px #000;
+}
+.ov-status b { color: var(--amber); font-weight: 600; }
+.ov-choices { display: flex; flex-wrap: wrap; gap: 4px; pointer-events: auto; }
+.ov-chip {
+  appearance: none;
+  font-family: inherit;
+  font-size: 9.5px;
+  line-height: 1.25;
+  letter-spacing: .2px;
+  color: #e8f2f8;
+  background: #0b0f14c9;
+  border: 1px solid #ffffff26;
+  border-radius: 999px;
+  padding: 3px 7px;
+  max-width: 100%;
+  text-align: left;
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+  text-shadow: 0 1px 2px #000;
+}
+.ov-chip:active { border-color: var(--amber); color: var(--amber); }
+.ov-chip .num { color: var(--teal); margin-right: 3px; }
 .scene-title {
   font-size: 13px;
   letter-spacing: 3px;

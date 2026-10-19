@@ -139,6 +139,17 @@ const Game = (function () {
     UI.renderArt(scene.art);
     UI.renderText(scene, state);
     UI.renderChoices(scene, state, handleChoice);
+
+    /* Плашка на картинке: состояние + доступные ходы.
+       Показываем только те варианты, что реально доступны игроку. */
+    if (scene.art) {
+      const visible = scene.choices.filter(function (c) {
+        if (c.showIf && !c.showIf(state)) return false;
+        if (c.needItem && !hasItem(state, c.needItem)) return false;
+        return true;
+      });
+      UI.renderOverlay(scene, state, visible, handleChoice);
+    }
   }
 
   /* ── Обработка выбора игрока ──────────────────────────── */

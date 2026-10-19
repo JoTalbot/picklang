@@ -10,6 +10,10 @@ STORY.alarm = {
   chapter: 3,
   art: "assets/art/web/alarm.jpg",
   title: "Коридор · тревога",
+  status: function (s) {
+    return "<b>Тревога</b> · контур держится " + (s.flags.reactorStable ? "на пределе" : "хуже, чем хотелось") +
+           " · решений принято: " + s.log.length;
+  },
   text: function (s) {
     const lines = [
       "Свет по всему коридору разом становится красным. Не мигает — просто меняет цвет, и от этого страшнее, чем от сирены.",
@@ -33,6 +37,16 @@ STORY.alarm = {
 STORY.gather = {
   chapter: 3,
   title: "Жилой сектор · последний разговор",
+  art: "assets/art/web/gather.jpg",
+  status: function (s) {
+    return "<b>Все семеро</b> · " + s.items.length + " предмет(а) в сумке" +
+           " · сейчас решается всё";
+  },
+  art: "assets/art/web/gather.jpg",
+  status: function (s) {
+    return "<b>Все семеро</b> · " + s.items.length + " предмет(а) в сумке" +
+           " · сейчас решается всё";
+  },
   text: function (s) {
     const lines = [
       "Они приходят все. Ковач с обожжённой рукой. Ирис с контейнером образцов, который она держит, как ребёнка. Техник и стажёр — их вывел кто-то из своих.",
@@ -62,6 +76,20 @@ STORY.final_choice = {
   chapter: 3,
   art: "assets/art/web/alarm.jpg",
   title: "Точка невозврата",
+  status: function (s) {
+    const parts = ["<b>Точка невозврата</b>"];
+    if (s.flags.signalKnown) parts.push("сигнал известен");
+    if (s.flags.veraControl) parts.push("управление ВЕРЫ у тебя");
+    if (s.flags.savedTech) parts.push("техник спасён");
+    return parts.join(" · ");
+  },
+  status: function (s) {
+    const parts = ["<b>Точка невозврата</b>"];
+    if (s.flags.signalKnown) parts.push("сигнал известен");
+    if (s.flags.veraControl) parts.push("управление ВЕРЫ у тебя");
+    if (s.flags.savedTech) parts.push("техник спасён");
+    return parts.join(" · ");
+  },
   text: function (s) {
     const lines = [
       "Тридцать одна минута. Ты стоишь в коридоре, где сходятся все двери станции, и понимаешь простую вещь: правильного ответа здесь нет и не будет.",
