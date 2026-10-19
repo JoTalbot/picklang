@@ -53,7 +53,16 @@ def execute_classic(source, task):
     if [arg.arg for arg in fn.args.args] != expected_args or fn.args.vararg or fn.args.kwarg or fn.args.kwonlyargs:
         raise ValueError("solve parameters must exactly match task input names")
     host = host_namespace(task)
-    allowed_names = set(expected_args) | set(host) | {"solve"}
+    local_names = set()
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if not isinstance(target, ast.Name):
+                    raise ValueError("assignment targets must be simple local names")
+                if target.id in set(expected_args) | set(host) | {"solve"}:
+                    raise ValueError("cannot overwrite an input, host function, or solve")
+                local_names.add(target.id)
+    allowed_names = set(expected_args) | set(host) | local_names | {"solve"}
     allowed_attributes = set(task["tools"])
     for node in ast.walk(tree):
         if type(node) not in ALLOWED_AST:
