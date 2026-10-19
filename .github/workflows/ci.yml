@@ -111,7 +111,7 @@ jobs:
             exit 1
           fi
       - name: Run live cascade
-        run: python eval_live_cascade.py --timeout 45 --write
+        run: python eval_live_cascade.py --timeout 45 --write --require-all
       - name: Print complete live results in logs
         if: always()
         shell: bash
