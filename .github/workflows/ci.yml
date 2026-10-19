@@ -73,6 +73,11 @@ jobs:
         run: |
           pick --help
           python demo.py
+      - name: One-shot classic-code baseline benchmark
+        run: |
+          python bench_live_cycle.py --write
+          echo "========== CLASSIC PYTHON BASELINE =========="
+          cat docs/LIVE_CYCLE.md
 
   live-openrouter:
     name: Live Groq cascade
