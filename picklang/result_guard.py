@@ -49,24 +49,56 @@ def _shallow(v):
 
 
 def compact_result(value: Any, max_tokens: int, cas=None) -> Any:
-    if estimate_tokens(value) <= max_tokens:
+    """Return the original value when it fits, otherwise a strictly bounded preview.
+
+    The complete value is stored before compaction when a CAS is available. Preview
+    compaction is shape-independent: large nested dictionaries and strings must not
+    bypass the budget merely because the top-level value is not a list.
+    """
+    if max_tokens < 1:
+        raise ValueError("max_tokens must be >= 1")
+    full_tokens = estimate_tokens(value)
+    if full_tokens <= max_tokens:
         return value
+
     ref = cas.put_json(value) if cas is not None else None
-    preview = value
     if isinstance(value, list):
-        preview = [_shallow(v) for v in value[:3]]
+        preview: Any = [_shallow(v) for v in value[:3]]
     elif isinstance(value, dict):
-        preview = {k: value[k] for k in list(value)[:5]}
+        preview = {k: _shallow(v) for k, v in list(value.items())[:5]}
     elif isinstance(value, str):
-        preview = value[:400] + "…"
-    result = {"truncated": True, "preview": preview, "tokens_full": estimate_tokens(value)}
+        preview = value[:400]
+    else:
+        preview = _shallow(value)
+
+    result = {"truncated": True, "preview": preview, "tokens_full": full_tokens}
     if ref:
         result["ref"] = ref
-    # preview тоже может оказаться большой — добиваем грубо, но честно помечаем
-    while estimate_tokens(result) > max_tokens and isinstance(preview, list) and preview:
-        preview = preview[:-1]
-        result["preview"] = preview
+
+    # Preserve a useful structured preview when possible. If nested values keep
+    # it over budget, switch to a serialized snippet and shrink that deterministically.
+    if estimate_tokens(result) > max_tokens:
+        try:
+            snippet = json.dumps(preview, ensure_ascii=False, default=str)
+        except Exception:
+            snippet = str(preview)
+        result["preview"] = snippet
+        while snippet and estimate_tokens(result) > max_tokens:
+            snippet = snippet[: max(0, len(snippet) // 2)]
+            result["preview"] = snippet
+
+    # Metadata itself can exceed extremely small budgets (notably a long CAS ref).
+    # Drop optional fields in order, then fall back to the smallest useful marker.
+    if estimate_tokens(result) > max_tokens:
+        result.pop("tokens_full", None)
+    if estimate_tokens(result) > max_tokens:
+        result.pop("ref", None)
+    if estimate_tokens(result) > max_tokens:
+        result.pop("preview", None)
+    if estimate_tokens(result) > max_tokens:
+        return {"truncated": True}
     return result
+
 
 
 class ToolResultGuard:
