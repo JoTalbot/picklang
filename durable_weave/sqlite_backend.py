@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from .cas import canonical_json, sha256_hex
-from .cas import canonical_json, sha256_hex
 
 GENESIS = "0" * 64
 
@@ -101,7 +100,12 @@ class SQLiteEventLog:
         for i in idx:
             ev = self.events[i]
             body = {k: v for k, v in ev.items() if k != "hash"}
-            prev_hash = GENESIS if i == 0 else self.events[i - 1]["hash"]
+            # После compaction первый сохранённый StateSnapshot является якорем
+            # прежней цепочки, поэтому его prev намеренно не равен GENESIS.
+            if i == 0 and ev.get("type") == "StateSnapshot":
+                prev_hash = ev.get("prev", GENESIS)
+            else:
+                prev_hash = GENESIS if i == 0 else self.events[i - 1]["hash"]
             if ev.get("prev") != prev_hash or event_hash(prev_hash, body) != ev.get("hash"):
                 return False, f"event {i}: нарушение на выборке"
         return True, f"sampled ok ({len(idx)}/{len(self.events)})"
