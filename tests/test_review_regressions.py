@@ -152,3 +152,31 @@ def test_live_validator_rejects_unknown_function_before_execution():
     assert validator("> t(u)\np = bank.charg(u, 5)\nout p.tx\n") is False
     assert calls == [], "программа не должна исполняться после статической ошибки"
     assert validator("> t(u)\np = bank.charge(u, 5)\nout p.tx\n") is True
+
+
+# --- 4. Промпт не должен учить обратной семантике стража; CLI без traceback --
+
+def test_grammar_prompt_matches_guard_semantics():
+    from eval_live_cascade import GRAMMAR
+    from picklang.interpreter import run_program
+
+    registry = {"f": lambda x: x}
+    assert run_program("> t(x)\n? x -> fail \"bad\"\nout x\n", registry, {"x": True}, prefer_aot=False)[0] is True
+    with pytest.raises(Exception):
+        run_program("> t(x)\n? x -> fail \"bad\"\nout x\n", registry, {"x": False}, prefer_aot=False)
+    # страж падает, когда условие ЛОЖНО: промпт не должен утверждать обратное
+    assert "если условие истинно" not in GRAMMAR
+    assert "если условие ложно" in GRAMMAR
+
+
+def test_cli_reports_syntax_error_without_traceback(tmp_path):
+    import subprocess
+    import sys
+
+    bad = tmp_path / "bad.pick"
+    bad.write_text('> t(u)\n? u.ok fail "x"\nout u\n', encoding="utf-8")
+    proc = subprocess.run([sys.executable, "-m", "picklang.cli", "check", str(bad)],
+                          capture_output=True, text=True)
+    assert proc.returncode == 2
+    assert "Traceback" not in proc.stderr
+    assert "line 2" in proc.stderr
