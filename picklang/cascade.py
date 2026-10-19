@@ -27,7 +27,13 @@ class ModelCascade:
                                        reasoning_max_tokens=self.reasoning_max_tokens)
                     ok = bool(text.strip()) and validator(text)
                 except Exception as e:
-                    self.log.append({"tier": tier_no, "model": model, "ok": False, "error": str(e)[:120]})
+                    message = str(e)
+                    self.log.append({"tier": tier_no, "model": model, "ok": False, "error": message[:120]})
+                    # HTTP 429 usually means provider quota/rate limiting. Trying every
+                    # remaining free model/task immediately only burns requests without
+                    # producing useful evaluation data.
+                    if "HTTP 429" in message or "Rate limit exceeded" in message:
+                        raise RuntimeError(f"provider rate limit; stopping cascade early: {message[:180]}") from e
                     continue
                 self.log.append({"tier": tier_no, "model": model, "ok": ok, "usage": usage})
                 if ok:
