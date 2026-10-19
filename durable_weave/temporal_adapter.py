@@ -94,6 +94,8 @@ def build_temporal_workflow():
 # --- Настоящие классы Temporal (если SDK установлен) --------------------
 HOST_REGISTRY: dict[str, Any] = {}
 try:  # pragma: no cover - зависит от окружения
+    import asyncio
+
     from datetime import timedelta as _td
 
     from temporalio import activity as _activity
@@ -116,21 +118,49 @@ try:  # pragma: no cover - зависит от окружения
         @_workflow.run
         async def run(self, ir: dict, inputs: dict):
             env = dict(inputs)
-            for step in ir["steps"]:
-                kind = step["kind"]
-                if kind in ("assign", "expr"):
-                    result = await self._eval(step["expr"], env)
-                    if step.get("target"):
-                        env[step["target"]] = result
-                elif kind == "guard":
-                    if not await self._eval(step["expr"], env):
-                        raise _AppErr("guard failed", non_retryable=True)
-                elif kind == "wait":
-                    name = step["signal"]
-                    await _workflow.wait_condition(lambda: name in self._signals)
-                    env[name] = self._signals[name]
-                elif kind == "out":
-                    return await self._eval(step["expr"], env)
+            compensations = []
+            try:
+                for step in ir["steps"]:
+                    kind = step["kind"]
+                    if kind in ("assign", "expr"):
+                        result = await self._eval(step["expr"], env)
+                        if step.get("target"):
+                            env[step["target"]] = result
+                        if "compensation" in step:
+                            compensations.append(step["compensation"])
+                    elif kind == "guard":
+                        if not await self._eval(step["expr"], env):
+                            raise _AppErr("guard failed", non_retryable=True)
+                    elif kind == "wait":
+                        name = step["signal"]
+                        await _workflow.wait_condition(lambda: name in self._signals)
+                        env[name] = self._signals[name]
+                    elif kind == "loop":
+                        items = await self._eval(step["expr"], env)
+                        body = step["body"]
+                        for item in items:
+                            env[step["loop_var"]] = item
+                            env[body["target"]] = await self._eval(body["expr"], env)
+                    elif kind == "parallel":
+                        values = await asyncio.gather(
+                            *(self._eval(e, env) for _t, e in step["branches"]))
+                        for (target, _e), value in zip(step["branches"], values):
+                            if target:
+                                env[target] = value
+                    elif kind == "donewhen":
+                        for cond in step["conditions"]:
+                            if not await self._eval(cond, env):
+                                raise _AppErr("done when не выполнен", non_retryable=True)
+                    elif kind == "out":
+                        return await self._eval(step["expr"], env)
+            except Exception:
+                # сага: компенсации activities в обратном порядке
+                for comp in reversed(compensations):
+                    try:
+                        await self._eval(comp, env)
+                    except Exception:
+                        pass
+                raise
 
         async def _eval(self, expr, env):
             if "lit" in expr:
@@ -145,6 +175,11 @@ try:  # pragma: no cover - зависит от окружения
                 return value
             if "map" in expr:
                 return {k: await self._eval(v, env) for k, v in expr["map"]}
+            if "cmp" in expr:
+                op, left, right = expr["cmp"]
+                lv, rv = await self._eval(left, env), await self._eval(right, env)
+                return {"==": lv == rv, "!=": lv != rv, ">": lv > rv, "<": lv < rv,
+                        ">=": lv >= rv, "<=": lv <= rv}[op]
             if "pipe" in expr:
                 value = await self._eval(expr["pipe"][0], env)
                 for stage in expr["pipe"][1:]:
