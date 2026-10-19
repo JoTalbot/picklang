@@ -10,18 +10,24 @@ from picklang.cascade import ModelCascade
 from picklang.live_agent import load_key
 
 PYTHON_GRAMMAR = """Write exactly one Python function named solve, no markdown.
-Use only supplied host functions; do not import modules or use filesystem/network/process APIs.
-Return the exact task result. Function parameters must match listed input names.
+Use only the listed host functions; no imports, loops, conditionals, comprehensions, or filesystem/network/process APIs.
+Use only straight-line assignments and a return. Function parameters must exactly match the listed input names.
+Return the exact task result. You may use list indexing or slicing, dictionaries, and fields on returned objects.
 Host functions: bank.charge(u, amount), web.search(q), dbl(i), d.get(x),
 db.create_sub(u), mail.send(u, sub_id), count(items).
-Example:
+Examples:
+def solve(q):
+    results = web.search(q)
+    return results[:1]
+
 def solve(u):
-    p = bank.charge(u, 5)
-    return p["tx"]
+    sub = db.create_sub(u)
+    message = mail.send(u, sub["id"])
+    return {"sub": sub["id"], "message": message["id"]}
 """
 ALLOWED_AST = {ast.Module, ast.FunctionDef, ast.arguments, ast.arg, ast.Return,
     ast.Assign, ast.Expr, ast.Call, ast.Name, ast.Load, ast.Store, ast.Constant,
-    ast.Dict, ast.List, ast.Tuple, ast.Subscript, ast.BinOp, ast.Mult, ast.Add,
+    ast.Dict, ast.List, ast.Tuple, ast.Subscript, ast.Slice, ast.BinOp, ast.Mult, ast.Add,
     ast.Attribute, ast.UnaryOp, ast.USub, ast.UAdd}
 
 def host_namespace(task):
@@ -79,7 +85,15 @@ def execute_classic(source, task):
             chain.append(cursor.id)
             dotted = ".".join(reversed(chain))
             if dotted not in allowed_attributes:
-                raise ValueError("attribute is not a declared host function: " + dotted)
+                # Permit ordinary fields on local values returned by host calls, but
+                # never private/dunder attributes or chained introspection.
+                if not (
+                    isinstance(cursor, ast.Name)
+                    and cursor.id in local_names
+                    and len(chain) == 2
+                    and not chain[0].startswith("_")
+                ):
+                    raise ValueError("attribute is not a declared host function or safe local field: " + dotted)
     namespace = {"__builtins__": {}}
     namespace.update(host)
     exec(compile(tree, "<classic-adapter>", "exec"), namespace, namespace)

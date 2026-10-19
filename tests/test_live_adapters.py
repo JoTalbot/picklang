@@ -9,7 +9,7 @@ from eval_live_cascade import TASKS
 
 @pytest.mark.parametrize("name,source", [
     ("charge_tx", 'def solve(u):\n    p = bank.charge(u, 5)\n    return p["tx"]'),
-    ("search_top1", 'def solve(q):\n    return [web.search(q)[0]]'),
+    ("search_top1", 'def solve(q):\n    results = web.search(q)\n    return results[:1]'),
     ("double_value", 'def solve(i):\n    return dbl(i)'),
     ("fields_a", 'def solve(x):\n    return {"a": d.get(x)["a"]}'),
     ("count_results", 'def solve(q):\n    return count(web.search(q))'),
