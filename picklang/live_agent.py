@@ -1,7 +1,7 @@
-"""Живой LLM-цикл через OpenRouter: модель пишет намерение для Genesis,
+"""Живой LLM-цикл через OpenAI-совместимый API: модель пишет намерение для Genesis,
 ошибки чинятся патчами, исполнение — на durable-рантайме.
 
-Ключ берётся из окружения OPENROUTER_API_KEY или из файла (--key-file).
+Ключ берётся из GROQ_API_KEY, OPENROUTER_API_KEY или из файла (--key-file).
 В репозиторий ключ не попадает никогда: только в заголовок запроса.
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
-API = "https://openrouter.ai/api/v1/chat/completions"
+API = os.environ.get("PICK_LIVE_API_URL", "https://openrouter.ai/api/v1/chat/completions")
 DEFAULT_MODELS = [
     "cohere/north-mini-code:free",
     "google/gemma-4-31b-it:free",
@@ -64,11 +64,12 @@ def _post_with_deadline(url: str, body: bytes, headers: dict, deadline_seconds: 
 
 
 def load_key(key_file: str | None = None) -> str:
-    if os.environ.get("OPENROUTER_API_KEY"):
-        return os.environ["OPENROUTER_API_KEY"].strip()
+    for name in ("GROQ_API_KEY", "OPENROUTER_API_KEY"):
+        if os.environ.get(name):
+            return os.environ[name].strip()
     if key_file:
         return Path(key_file).read_text(encoding="utf-8").strip()
-    raise LLMError("нет ключа: задайте OPENROUTER_API_KEY или --key-file")
+    raise LLMError("нет ключа: задайте GROQ_API_KEY, OPENROUTER_API_KEY или --key-file")
 
 
 def chat(key: str, model: str, messages: list[dict], timeout: int = 180,
@@ -77,8 +78,8 @@ def chat(key: str, model: str, messages: list[dict], timeout: int = 180,
     payload: dict = {"model": model, "messages": messages, "temperature": 0}
     if max_completion_tokens is not None:
         payload["max_tokens"] = max_completion_tokens
-    if reasoning_max_tokens is not None:
-        # кап скрытого рассуждения: на простых намерениях это главный налог
+    if reasoning_max_tokens is not None and "api.groq.com" not in API:
+        # OpenRouter supports this cap; Groq's OpenAI-compatible endpoint does not.
         payload["reasoning"] = {"max_tokens": reasoning_max_tokens}
     if json_schema is not None:
         # constrained decoding: провайдер не даст вернуть JSON вне схемы
