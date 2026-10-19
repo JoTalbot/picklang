@@ -1,3 +1,16 @@
+# picklang 0.1.2
+
+Patch release.
+
+- Add an executable paired A/B benchmark runner that invokes PICK and baseline adapters on identical task inputs.
+- Alternate adapter execution order, enforce per-invocation timeouts, and preserve raw outputs, timing, model/token telemetry, and input digests.
+- Document the adapter protocol and explicitly distinguish adapter-reported success, semantic equivalence, token usage, and billed cost.
+- Keep the release gate: main-branch unit/package checks and all six live Groq cascade tasks must pass before publication.
+
+The paired runner is a harness, not evidence that PICK is faster or cheaper by itself. Such claims require actual paired runs with equivalent validators and comparable provider/model settings. Live evaluation consumes provider quota.
+
+---
+
 # picklang 0.1.1
 
 Patch release.
