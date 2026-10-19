@@ -1,4 +1,4 @@
-name: PICK CI and live OpenRouter eval
+name: PICK CI and live LLM eval
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       run_live:
-        description: "Run live OpenRouter cascade (uses API quota; run only when quota is available)"
+        description: "Run live Groq cascade (uses API quota)"
         required: false
         default: true
         type: boolean
@@ -75,7 +75,7 @@ jobs:
           python demo.py
 
   live-openrouter:
-    name: Live OpenRouter cascade
+    name: Live Groq cascade
     needs: tests
     if: >-
       github.repository == 'JoTalbot/testing' &&
@@ -85,7 +85,9 @@ jobs:
     runs-on: [self-hosted, linux, arm64]
     timeout-minutes: 25
     env:
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_TOKEN }}
+      GROQ_API_KEY: ${{ secrets.GROQ_TOKEN }}
+      PICK_LIVE_PROVIDER: groq
+      PICK_LIVE_API_URL: https://api.groq.com/openai/v1/chat/completions
       PICK_LIVE_MODEL_TIERS: ${{ vars.PICK_LIVE_MODEL_TIERS }}
     steps:
       - uses: actions/checkout@v4
@@ -106,11 +108,11 @@ jobs:
           cache: pip
       - name: Install package
         run: python -m pip install --upgrade pip && python -m pip install -e .
-      - name: Validate secret is configured
+      - name: Validate Groq secret is configured
         shell: bash
         run: |
-          if [ -z "$OPENROUTER_API_KEY" ]; then
-            echo "::error::Repository secret OPENROUTER_TOKEN is missing or empty."
+          if [ -z "$GROQ_API_KEY" ]; then
+            echo "::error::Repository secret GROQ_TOKEN is missing or empty."
             exit 1
           fi
       - name: Run live cascade
@@ -119,7 +121,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          echo "========== LIVE OPENROUTER CASCADE =========="
+          echo "========== LIVE GROQ CASCADE =========="
           echo "Repository: $GITHUB_REPOSITORY"
           echo "Commit: $GITHUB_SHA"
           echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
@@ -167,7 +169,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo "## Live OpenRouter cascade"
+            echo "## Live Groq cascade"
             echo ""
             echo "- Repository: $GITHUB_REPOSITORY"
             echo "- Commit: $GITHUB_SHA"
