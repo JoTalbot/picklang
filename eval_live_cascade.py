@@ -85,6 +85,7 @@ def main():
     ap.add_argument("--key-file")
     ap.add_argument("--write", action="store_true")
     ap.add_argument("--timeout", type=int, default=45)
+    ap.add_argument("--require-all", action="store_true", help="return nonzero unless every live task passes")
     args = ap.parse_args()
     key = load_key(args.key_file)
 
@@ -132,7 +133,11 @@ def main():
                   "цифры одного прогона, а не статистика."]
         Path("docs/LIVE_CASCADE.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
         print("docs/LIVE_CASCADE.md обновлён")
+    if args.require_all and ok != len(results):
+        print(f"ОШИБКА: --require-all задан, но прошли только {ok}/{len(results)} задач", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
