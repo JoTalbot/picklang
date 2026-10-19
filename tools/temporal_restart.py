@@ -33,6 +33,7 @@ def spawn_worker(target: str) -> tuple[subprocess.Popen, int]:
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     line = proc.stdout.readline() if proc.stdout else ""
     if "worker ready" not in line:
+        proc.terminate()
         raise RuntimeError(f"воркер не поднялся: {line[:200]}")
     return proc, int(line.split("pid=")[1].strip())
 
