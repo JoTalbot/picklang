@@ -1,6 +1,8 @@
 name: PICK CI and live LLM eval
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
@@ -20,6 +22,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Run untrusted PR code only on GitHub-hosted runners, never on the self-hosted machine.
+  pr-tests:
+    name: PR unit tests and package checks
+    if: github.repository == 'JoTalbot/testing' && github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install package and test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+      - name: Run tests
+        run: python -m pytest tests/ -q
+      - name: Build source distribution and wheel
+        run: |
+          python -m pip install build
+          python -m build
+          python - <<'PY'
+          from pathlib import Path
+          assert list(Path("dist").glob("*.whl")), "wheel was not produced"
+          assert list(Path("dist").glob("*.tar.gz")), "source distribution was not produced"
+          print("Wheel and source distribution built successfully.")
+          PY
+
   tests:
     name: Unit tests and package checks
     if: github.repository == 'JoTalbot/testing' && github.ref == 'refs/heads/main'
