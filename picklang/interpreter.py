@@ -165,8 +165,9 @@ def _aot_eligible(source: str, activity_hook, capabilities, untrusted) -> bool:
         steps = _parse_cached(source)
     except Exception:
         return False
-    if any(s.kind == "wait" for s in steps):
-        return False  # сигналы и состояние approval — семантика интерпретатора, AOT видит только provider
+    if any(s.kind in ("wait", "parallel") for s in steps):
+        # AOT currently executes parallel branches sequentially; keep interpreter semantics.
+        return False
     return all((s.retries or 0) == 0 and s.effect is None for s in steps)
 
 
