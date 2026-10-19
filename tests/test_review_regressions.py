@@ -4,13 +4,12 @@
 """
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from durable_weave.pickrun import run_pick
-from picklang.interpreter import run_program
+from picklang.interpreter import PickRuntimeError, TaskNotDone, run_program
 from picklang.stdlib import with_stdlib
 
 PAYMENT = (Path(__file__).resolve().parent.parent / "examples/payment.pick").read_text(encoding="utf-8")
@@ -35,7 +34,7 @@ def _declining_bank(calls: list[str]):
 
 def test_guard_failure_rolls_back_saga_in_interpreter():
     calls = []
-    with pytest.raises(Exception):
+    with pytest.raises(PickRuntimeError):
         run_program(PAYMENT, _declining_bank(calls), {"id": "o1", "amt": 500}, prefer_aot=False)
     assert calls == ["reserve", "charge", "refund", "release"], calls
 
@@ -49,9 +48,9 @@ def test_guard_failure_rolls_back_saga_in_durable_runtime(tmp_path):
 
 def test_interpreter_and_aot_agree_on_guard_rollback():
     interp, aot = [], []
-    with pytest.raises(Exception):
+    with pytest.raises(PickRuntimeError):
         run_program(PAYMENT, _declining_bank(interp), {"id": "o1", "amt": 500}, prefer_aot=False)
-    with pytest.raises(Exception):
+    with pytest.raises(PickRuntimeError):
         run_program(PAYMENT, _declining_bank(aot), {"id": "o1", "amt": 500}, prefer_aot=True)
     assert interp == aot, (interp, aot)
 
@@ -66,7 +65,7 @@ def test_done_when_failure_rolls_back_saga():
         "hold": lambda: (calls.append("hold"), {"ok": 0})[1],
         "free": lambda a: calls.append("free"),
     })
-    with pytest.raises(Exception):
+    with pytest.raises(TaskNotDone):
         run_program(src, registry, {}, prefer_aot=False)
     assert calls == ["hold", "free"], calls
 
@@ -161,9 +160,10 @@ def test_grammar_prompt_matches_guard_semantics():
     from picklang.interpreter import run_program
 
     registry = {"f": lambda x: x}
-    assert run_program("> t(x)\n? x -> fail \"bad\"\nout x\n", registry, {"x": True}, prefer_aot=False)[0] is True
-    with pytest.raises(Exception):
-        run_program("> t(x)\n? x -> fail \"bad\"\nout x\n", registry, {"x": False}, prefer_aot=False)
+    src = "> t(x)\n? x -> fail \"bad\"\nout x\n"
+    assert run_program(src, registry, {"x": True}, prefer_aot=False)[0] is True
+    with pytest.raises(PickRuntimeError):
+        run_program(src, registry, {"x": False}, prefer_aot=False)
     # страж падает, когда условие ЛОЖНО: промпт не должен утверждать обратное
     assert "если условие истинно" not in GRAMMAR
     assert "если условие ложно" in GRAMMAR
@@ -176,7 +176,7 @@ def test_cli_reports_syntax_error_without_traceback(tmp_path):
     bad = tmp_path / "bad.pick"
     bad.write_text('> t(u)\n? u.ok fail "x"\nout u\n', encoding="utf-8")
     proc = subprocess.run([sys.executable, "-m", "picklang.cli", "check", str(bad)],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, check=False)
     assert proc.returncode == 2
     assert "Traceback" not in proc.stderr
     assert "line 2" in proc.stderr
