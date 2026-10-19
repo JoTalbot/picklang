@@ -26,6 +26,16 @@ def _fused_top_fields(items, n, *names):
     return out
 
 
+_FN_INDEX: dict[str, int] = {}
+
+
+def _fn_ref(name: str) -> str:
+    """Прямая ссылка на функцию по индексу вместо registry[name] на каждый вызов."""
+    if name not in _FN_INDEX:
+        _FN_INDEX[name] = len(_FN_INDEX)
+    return f"_fn[{_FN_INDEX[name]}]"
+
+
 def _gen_expr(expr, env="env", reg="registry") -> str:
     if "lit" in expr:
         return repr(expr["lit"])
@@ -55,11 +65,11 @@ def _gen_expr(expr, env="env", reg="registry") -> str:
         code = _gen_expr(stages[0], env, reg)
         for stage in stages[1:]:
             args = ", ".join([code] + [_gen_expr(a, env, reg) for a in stage["args"]])
-            code = f"{reg}[{stage['call']!r}]({args})"
+            code = f"{_fn_ref(stage['call'])}({args})"
         return code
     if "call" in expr:
         args = ", ".join(_gen_expr(a, env, reg) for a in expr["args"])
-        return f"{reg}[{expr['call']!r}]({args})"
+        return f"{_fn_ref(expr['call'])}({args})"
     raise ValueError(f"unsupported expr: {expr}")
 
 
@@ -134,10 +144,11 @@ def generate_python(source: str) -> str:
             lines.append(f"    out = {_gen_expr(step['expr'])}")
     lines.append("    return out")
     header = ["def _pick_program(env, registry, signal_provider=None):",
-              "    from picklang.interpreter import WaitingSignal"]
+              "    from picklang.interpreter import WaitingSignal",
+              "    _fn = [registry.get(_n) for _n in _FN_NAMES]"]
     if any("compensation" in s for s in ir["steps"]):
         # сага: при бизнес-ошибке компенсации в обратном порядке, затем проброс
-        wrapped = [header[0], header[1], "    try:"]
+        wrapped = header + ["    try:"]
         wrapped += ["    " + ln if ln.strip() else ln for ln in lines]
         wrapped += ["    except Exception as _e:",
                     "        for _comp in reversed(_compensations):",
@@ -152,7 +163,10 @@ def _compiled_source(source: str):
     """Кэш по самому тексту программы: digest считается один раз внутри,
     а не на каждый вызов (иначе кэш съедается повторным парсингом)."""
     ns: dict[str, Any] = {"_fused_top_fields": _fused_top_fields, "DoneWhenFailed": DoneWhenFailed}
-    exec(generate_python(source), ns)
+    _FN_INDEX.clear()
+    code = generate_python(source)
+    ns["_FN_NAMES"] = [name for name, _ in sorted(_FN_INDEX.items(), key=lambda kv: kv[1])]
+    exec(code, ns)
     return ns["_pick_program"]
 
 

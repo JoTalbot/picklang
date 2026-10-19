@@ -79,7 +79,7 @@ def test_6_batch_loop():
 def test_7_cascade_escalates(monkeypatch):
     import picklang.cascade as casc
     answers = iter([("bad model", "мусор"), ("good model", '{"goal": "x", "steps": []}')])
-    def fake_chat(key, model, messages, timeout=None, json_schema=None):
+    def fake_chat(key, model, messages, timeout=None, json_schema=None, **kw):
         _m, text = next(answers)
         return text, {"total_tokens": 10}
     monkeypatch.setattr(casc, "chat", fake_chat)

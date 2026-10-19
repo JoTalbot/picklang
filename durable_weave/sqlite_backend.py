@@ -11,7 +11,13 @@ from pathlib import Path
 from typing import Any
 
 from .cas import canonical_json, sha256_hex
-from .eventlog import GENESIS, event_hash
+from .cas import canonical_json, sha256_hex
+
+GENESIS = "0" * 64
+
+
+def event_hash(prev_hash: str, event_without_hash: dict[str, Any]) -> str:
+    return sha256_hex(prev_hash.encode() + canonical_json(event_without_hash))
 
 
 class SQLiteEventLog:
@@ -20,6 +26,9 @@ class SQLiteEventLog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(self.path))
         self.db.execute("PRAGMA journal_mode=WAL")
+        # WAL + NORMAL: процесс может умереть без потери коммитов, fsync на каждый
+        # коммит не делается (риск — только смерть ОС/питания, это честный обмен)
+        self.db.execute("PRAGMA synchronous=NORMAL")
         self.db.execute("CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY, type TEXT, data TEXT, prev TEXT, hash TEXT)")
         self.db.commit()
         self.events: list[dict[str, Any]] = []

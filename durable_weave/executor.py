@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .cas import ContentAddressedStore
-from .eventlog import EventLog
+from .sqlite_backend import SQLiteEventLog
 
 
 class SimulatedCrash(Exception):
@@ -78,19 +78,7 @@ class Context:
                     time.sleep(min(0.05 * (2 ** attempt), 0.5))
         else:
             raise last_exc  # type: ignore[misc]
-        # Commit point: сначала CAS, потом событие в цепочку — только после этого шаг «был».
-        result_ref = ex.cas.put_json({"activity": name, "step": step_id, "result": result})
-        ex.log.append("ActivityCompleted", {
-            "step": step_id, "activity": name, "idempotency_key": idempotency_key,
-            "input_digest": ex.cas.put_json(payload), "result_ref": result_ref,
-        })
-        ex._completed[step_id] = result_ref
-        ex._steps_done += 1
-        if ex.snapshot_every and ex._steps_done % ex.snapshot_every == 0:
-            snap_ref = ex.cas.put_json({"seq": len(ex.log.events), "completed": dict(ex._completed)})
-            ex.log.append("StateSnapshot", {"snapshot_ref": snap_ref, "steps": ex._steps_done})
-        if ex.crash_after is not None and ex._steps_done >= ex.crash_after:
-            raise SimulatedCrash(f"simulated crash after {ex._steps_done} committed activities")
+        ex._commit_activity(step_id, name, payload, result, idempotency_key)
         return result
 
     def execute_parallel(self, calls: list[tuple[str, dict, str]]) -> list[Any]:
@@ -117,17 +105,25 @@ class Context:
                 return i, handler({**payload, "_idempotency_key": key, "_execution_id": self.execution_id})
             with ThreadPoolExecutor(max_workers=len(pending)) as pool:
                 done = dict(pool.map(run_one, pending.items()))
+            batch = []
             for i in pending:  # коммиты канонично по объявленному порядку
                 name, payload, key = pending[i]
                 result = done[i]
                 step_id = f"par{i}:{name}:{key}"
                 ref = ex.cas.put_json({"activity": name, "step": step_id, "result": result})
-                ex.log.append("ActivityCompleted", {"step": step_id, "activity": name,
+                batch.append(("ActivityCompleted", {"step": step_id, "activity": name,
                                                     "idempotency_key": key,
                                                     "input_digest": ex.cas.put_json(payload),
-                                                    "result_ref": ref})
+                                                    "result_ref": ref}))
                 ex._completed[step_id] = ref
                 results[i] = result
+            # весь frontier — одна транзакция (append_many), а не коммит на событие
+            append_many = getattr(ex.log, "append_many", None)
+            if append_many is not None:
+                append_many(batch)
+            else:
+                for type_, data in batch:
+                    ex.log.append(type_, data)
         return results
 
     def wait_signal(self, name: str) -> Any:
@@ -138,26 +134,42 @@ class Context:
 
 class DurableExecutor:
     def __init__(self, workdir: str | Path, handlers: dict[str, Handler], crash_after: int | None = None,
-                 storage: str = "jsonl", snapshot_every: int | None = None):
+                 storage: str = "sqlite", snapshot_every: int | None = None):
         self.workdir = Path(workdir)
         self.handlers = handlers
         self.crash_after = crash_after
-        self.storage = storage  # "jsonl" | "sqlite" — цепочка и гарантии те же
+        if storage != "sqlite":
+            raise ValueError("единственный backend журнала — sqlite (jsonl удалён)")
+        self.storage = storage
         self.snapshot_every = snapshot_every  # П.1: снимок completed-карты каждые N шагов
         self.snapshot_used = False
         self.cas = ContentAddressedStore(self.workdir / "cas")
-        self.log: EventLog | None = None  # type: ignore
+        self.log: SQLiteEventLog | None = None
         self._completed: dict[str, str] = {}
         self._signals: dict[str, Any] = {}
         self._steps_done = 0
 
+    def _commit_activity(self, step_id: str, name: str, payload: dict, result: Any,
+                         idempotency_key: str | None = None) -> str:
+        """Commit point, общий для sync/async: CAS -> событие -> снимок по расписанию."""
+        result_ref = self.cas.put_json({"activity": name, "step": step_id, "result": result})
+        assert self.log is not None
+        self.log.append("ActivityCompleted", {
+            "step": step_id, "activity": name, "idempotency_key": idempotency_key,
+            "input_digest": self.cas.put_json(payload), "result_ref": result_ref,
+        })
+        self._completed[step_id] = result_ref
+        self._steps_done += 1
+        if self.snapshot_every and self._steps_done % self.snapshot_every == 0:
+            snap_ref = self.cas.put_json({"seq": len(self.log.events), "completed": dict(self._completed)})
+            self.log.append("StateSnapshot", {"snapshot_ref": snap_ref, "steps": self._steps_done})
+        if self.crash_after is not None and self._steps_done >= self.crash_after:
+            raise SimulatedCrash(f"simulated crash after {self._steps_done} committed activities")
+        return result_ref
+
     # --- жизненный цикл исполнения -------------------------------------
     def _load(self, execution_id: str) -> None:
-        if self.storage == "sqlite":
-            from .sqlite_backend import SQLiteEventLog
-            self.log = SQLiteEventLog(self.workdir / "executions" / execution_id / "events.db")
-        else:
-            self.log = EventLog(self.workdir / "executions" / execution_id / "events.jsonl")
+        self.log = SQLiteEventLog(self.workdir / "executions" / execution_id / "events.db")
         self._completed = {}
         self._signals = {}
         self.snapshot_used = False

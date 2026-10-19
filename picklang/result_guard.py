@@ -23,6 +23,17 @@ def _encoding():
         return None
 
 
+def estimate_tokens_fast(value: Any) -> int:
+    """Грубая оценка без BPE-кодирования: ~4 символа на токен.
+
+    Для программ без токен-бюджета точный подсчёт на каждый вызов — чистый
+    оверхед (BPE дороже самой логики шага); калибровка по cl100k даёт
+    ошибку в пределах десятков процентов, для статистики этого хватает.
+    """
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+    return max(1, len(text) // 4)
+
+
 def estimate_tokens(value: Any) -> int:
     text = json.dumps(value, ensure_ascii=False, default=str)
     enc = _encoding()

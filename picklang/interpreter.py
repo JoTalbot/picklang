@@ -20,7 +20,7 @@ from typing import Any, Callable
 from functools import lru_cache
 
 from .parser import parse
-from .result_guard import estimate_tokens
+from .result_guard import estimate_tokens, estimate_tokens_fast
 
 
 @lru_cache(maxsize=128)
@@ -57,6 +57,7 @@ class _State:
     def __init__(self, capabilities=None, untrusted=(), resolve_secrets=True):
         self.steps = 0
         self.tokens = 0
+        self.exact_tokens = False  # True только если в программе есть !budget tokens
         self.budget: dict[str, int] = {}
         self.capabilities = capabilities
         self.untrusted = set(untrusted)
@@ -69,7 +70,7 @@ class _State:
     def charge_call(self, name: str, result: Any) -> Any:
         with self.lock:
             self.steps += 1
-            self.tokens += estimate_tokens(result)
+            self.tokens += estimate_tokens(result) if self.exact_tokens else estimate_tokens_fast(result)
             if "steps" in self.budget and self.steps > self.budget["steps"]:
                 raise BudgetExceeded(f"бюджет шагов исчерпан на {name}: {self.steps} > {self.budget['steps']}")
             if "tokens" in self.budget and self.tokens > self.budget["tokens"]:
@@ -198,6 +199,7 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
     compensations: list = []
     trace: list[str] = []
     state = _State(capabilities=capabilities, untrusted=untrusted)
+    state.exact_tokens = any(s.kind == "budget" and s.budget and "tokens" in s.budget for s in steps)
     state.approved = bool(env.get("approval"))
     output = None
     done_conditions: list = []
