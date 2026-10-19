@@ -68,7 +68,8 @@ jobs:
   tests:
     name: Unit tests and package checks
     if: github.repository == 'JoTalbot/testing' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, linux, arm64]
+    # Public repository: hosted runners avoid indefinite waits for an offline ARM64 runner.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -132,7 +133,8 @@ jobs:
       github.ref == 'refs/heads/main' &&
       needs.tests.result == 'success' &&
       (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_live))
-    runs-on: [self-hosted, linux, arm64]
+    # Live provider secrets are used only on trusted main-branch pushes/dispatches.
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_TOKEN }}
