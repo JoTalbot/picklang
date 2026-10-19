@@ -101,11 +101,11 @@ def main():
         started = time.monotonic()
         captured = {"output": None}
         if mode == "pick":
-            prompt = GRAMMAR + f"\nФункции хоста: {', '.join(task['tools'])}\nВход: {list(task['inputs'])}\nЗадача: {description}\n"
+            prompt = GRAMMAR + f"\nФункции хоста: {', '.join(task['tools'])}\nВходные данные: {json.dumps(task['inputs'], ensure_ascii=False)}\nЗадача: {description}\n"
             validator = make_validator(task)
         else:
             prompt = (PYTHON_GRAMMAR + f"\nTask: {description}\nInputs: {json.dumps(task['inputs'], ensure_ascii=False)}\n"
-                + f"Expected result: {json.dumps(task['expected'], ensure_ascii=False)}\nAllowed tools: {', '.join(task['tools'])}\n")
+                + f"Allowed tools: {', '.join(task['tools'])}\n")
             def validator(source):
                 try:
                     output = execute_classic(source, task)
