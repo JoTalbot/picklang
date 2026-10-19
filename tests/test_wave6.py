@@ -157,3 +157,21 @@ def test_auto_aot_fast_path_parity():
     src2 = "> t(x)\ny = f(x) ! undo(y)\nout y\n"
     reg2 = {"f": lambda x: 5, "undo": lambda y: None}
     assert run_program(src2, reg2, {"x": 1})[0] == 5
+
+
+def test_aot_batch_loop_and_donewhen_via_fast_path():
+    calls = {"batch": 0}
+    reg = {"ship": lambda i: i * 10, "ship.batch": lambda xs: [x * 10 for x in xs]}
+    orig = reg["ship.batch"]
+    def batch(xs):
+        calls["batch"] += 1
+        return orig(xs)
+    reg["ship.batch"] = batch
+    out, _, _ = run_program("> t(xs)\nfor i in xs: y = ship(i)\nout y\n", reg, {"xs": [1, 2, 3]})
+    assert out == [10, 20, 30] and calls["batch"] == 1
+    from picklang.interpreter import TaskNotDone
+    try:
+        run_program("> t(x)\ny = f(x)\ndone when: y > 5\nout y\n", {"f": lambda x: 1}, {"x": 1})
+        raise AssertionError("ждался TaskNotDone")
+    except TaskNotDone:
+        pass

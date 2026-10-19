@@ -158,16 +158,12 @@ def _aot_eligible(source: str, activity_hook, capabilities, untrusted) -> bool:
     """AOT — быстрый путь без саг, бюджетов, taint, capabilities и durable-хуков."""
     if activity_hook is not None or capabilities is not None or untrusted:
         return False
-    if "secret:" in source or " !" in source or "!budget" in source:
+    if "secret:" in source or "!budget" in source:
         return False
     try:
         steps = _parse_cached(source)
     except Exception:
         return False
-    if any(s.kind == "donewhen" for s in steps):
-        return False  # TaskNotDone — семантика интерпретатора, AOT бросает RuntimeError
-    if any(s.kind == "loop" for s in steps):
-        return False  # у цикла есть batch-семантика интерпретатора, AOT её не повторяет
     if any(s.kind == "wait" and s.timeout is not None for s in steps):
         return False  # таймауты и else-ветки ожидания — только интерпретатор
     return all((s.retries or 0) == 0 and s.effect is None for s in steps)
@@ -181,7 +177,7 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
                 prefer_aot: bool = True):
     """Возвращает (output, env, trace). Бросает WaitingSignal, если сигнала ещё нет."""
     if prefer_aot and _aot_eligible(source, activity_hook, capabilities, untrusted):
-        from .aot import run_compiled
+        from .aot import DoneWhenFailed, run_compiled
         trace: list[str] = []
         def _traced(name, fn):
             def call(*args):
@@ -192,6 +188,8 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
         env0 = dict(inputs or {})
         try:
             out, env_out = run_compiled(source, traced_registry, env0, signal_provider)
+        except DoneWhenFailed as e:
+            raise TaskNotDone(str(e)) from e
         except RuntimeError as e:
             raise PickRuntimeError(str(e)) from e
         return out, env_out, trace
