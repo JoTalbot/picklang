@@ -50,6 +50,18 @@ jobs:
         run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
       - name: Run tests
         run: python -m pytest tests/ -q
+      - name: Build source distribution and wheel
+        run: |
+          python -m pip install build
+          python -m build
+          python - <<'PY'
+          from pathlib import Path
+          wheels = list(Path("dist").glob("*.whl"))
+          sdists = list(Path("dist").glob("*.tar.gz"))
+          assert wheels, "wheel was not produced"
+          assert sdists, "source distribution was not produced"
+          print("Built:", *(str(p) for p in sorted(wheels + sdists)), sep="\\n  ")
+          PY
       - name: Verify CLI and demo
         run: |
           pick --help
