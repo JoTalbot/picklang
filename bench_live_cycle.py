@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
-"""Живой цикл одной задачи через словарь + Genesis, с замером токенов по этапам.
+"""Fair token-cost benchmark for one durable subscription task and amortization.
 
-Задача: оформление подписки. Этапы, за которые платит LLM:
-  1) намерение (Genesis dict) -> сгенерированная программа PICK;
-  2) ошибка в программе (опечатка в функции) -> исправление патчем,
-     а не пересылкой программы целиком;
-  3) исполнение на durable-рантайме: падение после первого шага,
-     resume без повторной оплаты банку; verify по digest.
-Сравнение: тот же цикл «напрямую» — полная программа PICK руками и
-эквивалент на Python (examples/subscription.py) при каждой итерации.
-Запуск: python3 bench_live_cycle.py [--write]
+Token counts measure model-authored text, not generated PICK code. The report
+includes the one-time vocabulary/bootstrap cost and shows when reuse pays off.
+This is a token-only generation comparison; semantic equivalence and runtime
+latency require separate measurements.
 """
 import json
+import math
 import sys
 import tempfile
 from pathlib import Path
@@ -44,18 +40,55 @@ def tokens(text: str, enc) -> int:
     return len(enc.encode(text)) if enc else round(len(text) / 4)
 
 
+def calculate_amortized_costs(vocab_tokens: int, pick_task_tokens: int,
+                              python_task_tokens: int,
+                              task_counts=(1, 10, 100)):
+    """Compare total and per-task model-authored tokens, including PICK setup."""
+    if min(vocab_tokens, pick_task_tokens, python_task_tokens) < 0:
+        raise ValueError("token costs must be non-negative")
+    rows = []
+    for count in task_counts:
+        if count < 1:
+            raise ValueError("task counts must be positive")
+        pick_total = vocab_tokens + count * pick_task_tokens
+        python_total = count * python_task_tokens
+        rows.append({
+            "tasks": count,
+            "pick_total": pick_total,
+            "python_total": python_total,
+            "pick_per_task": pick_total / count,
+            "python_per_task": python_total / count,
+            "saving_multiple": python_total / pick_total if pick_total else None,
+        })
+    return rows
+
+
+def break_even_tasks(vocab_tokens: int, pick_task_tokens: int,
+                     python_task_tokens: int):
+    """Smallest task count at which PICK's cumulative token cost is lower."""
+    per_task_saving = python_task_tokens - pick_task_tokens
+    if per_task_saving <= 0:
+        return None
+    # Strictly lower, not merely equal.
+    return max(1, math.floor(vocab_tokens / per_task_saving) + 1)
+
+
 def main():
     try:
         import tiktoken
         enc = tiktoken.get_encoding("cl100k_base")
         enc_name = "cl100k_base"
     except ImportError:
-        enc, enc_name = None, "~символы/4 (tiktoken не установлен)"
+        enc, enc_name = None, "~символы/4 (tiktoken не установлен; приблизительно)"
 
-    report = [f"# Живой цикл задачи «подписка» (автогенерация: bench_live_cycle.py --write)",
-              "", f"Токенизатор: {enc_name}.", ""]
+    report = ["# Живой цикл задачи «подписка» и честная амортизация",
+              "", f"Токенизатор: {enc_name}.",
+              "",
+              "Это сравнение токенов текста, отправляемого модели, а не общей производительности.",
+              "Качество, эквивалентность поведения и время выполнения нужно оценивать отдельными тестами.",
+              "Для PICK словарь считается один раз и затем переиспользуется; для классического варианта",
+              "считается полный Python-файл и его полная пересылка при исправлении."]
     with tempfile.TemporaryDirectory() as tmp:
-        # --- словарь проекта: один раз дорого, дальше — по одному слову ---
         vocab = Vocabulary(Path(tmp) / "vocab")
         for alias, (params, body) in VOCAB.items():
             vocab.add(alias, params, body)
@@ -69,13 +102,10 @@ def main():
             "mail.send": lambda user, text: {"id": "m1"},
             "log.event": lambda name: None,
         }
-
-        # --- этап «ошибка -> патч» -------------------------------------
         broken = generated.replace("bank.charge", "bank.charg")
         patches = suggest_patches(broken, registry=registry)
         patch_text = patches[0]["patch"] if patches else ""
 
-        # --- исполнение: падение после 1 шага, resume, verify ----------
         calls = {"charge": 0}
         registry["bank.charge"] = lambda user, amt: calls.__setitem__("charge", calls["charge"] + 1) or {"ok": True, "tx": "tx1"}
         workdir = Path(tmp) / "run"
@@ -84,37 +114,57 @@ def main():
         verified = ex.verify("sub-1")
 
         py_source = Path("examples/subscription.py").read_text(encoding="utf-8")
-        rows = [
-            ("Намерение для Genesis (то, что пишет LLM)", json.dumps(INTENT, ensure_ascii=False), None),
-            ("Сгенерированная программа PICK (пишет генератор, не LLM)", generated, None),
-            ("Та же программа, если писать PICK руками целиком", generated, None),
-            ("Эквивалент на Python целиком (examples/subscription.py)", py_source, None),
-            ("Исправление опечатки: патч", patch_text, None),
-            ("Исправление по-старому: программа целиком заново", generated, None),
-        ]
-        report += ["| Этап живого цикла | Токенов платит LLM |", "|---|---:|"]
-        values = {}
-        for label, text, _ in rows:
-            n = tokens(text, enc)
-            values[label] = n
-            pays = "0 (машина)" if label.startswith("Сгенерированная") else str(n)
-            report.append(f"| {label} | {pays} |")
-            print(f"{label:58} {n:>6} ток.")
-        cycle_pick = values["Намерение для Genesis (то, что пишет LLM)"] + values["Исправление опечатки: патч"]
-        cycle_py = values["Эквивалент на Python целиком (examples/subscription.py)"] * 2  # программа + её же пересылка при правке
+        vocab_source = json.dumps(VOCAB, ensure_ascii=False, separators=(",", ":"))
+        intent_text = json.dumps(INTENT, ensure_ascii=False, separators=(",", ":"))
+        vocab_cost = tokens(vocab_source, enc)
+        intent_cost = tokens(intent_text, enc)
+        patch_cost = tokens(patch_text, enc)
+        python_cost = tokens(py_source, enc) * 2
+        pick_task_cost = intent_cost + patch_cost
+
         report += ["",
-                   f"**Итого за цикл «написать + исправить ошибку»: через Genesis+патч — {cycle_pick} токенов, "
-                   f"классически на Python (код + пересылка при правке) — {cycle_py} токенов. Выигрыш {cycle_py / cycle_pick:.1f}x.**",
+                   "| Компонент | Токенов модели |",
+                   "|---|---:|",
+                   f"| Первичная настройка словаря PICK (один раз) | {vocab_cost} |",
+                   f"| Намерение для Genesis на задачу | {intent_cost} |",
+                   f"| Исправление патчем на задачу | {patch_cost} |",
+                   f"| Полная программа Python + полная пересылка при исправлении | {python_cost} |",
+                   f"| Генерация PICK после намерения (машина, не LLM) | 0 |",
                    "",
-                   f"Исполнение: первый запуск — {r1.status} (искусственное падение после закоммиченного шага), "
-                   f"второй — {r2.status}, списаний у банка: {calls['charge']} (повторного нет — шаг взят из журнала), "
-                   f"verify: {verified['verified']}, digest исполнения: `{verified['digest'][:16]}…`, событий в журнале: {verified['events']}.",
+                   "## Суммарная стоимость с учётом повторного использования",
                    "",
-                   "Чего цикл НЕ измеряет: стоимость первичного создания словаря проекта (2 блока, платится один раз",
-                   "на проект) и уникальную бизнес-логику внутри функций хоста — она вне языка на любом подходе."]
+                   "| Задач | PICK всего | Python всего | PICK на задачу | Python на задачу | Соотношение Python/PICK |",
+                   "|---:|---:|---:|---:|---:|---:|"]
+        amortized = calculate_amortized_costs(vocab_cost, pick_task_cost, python_cost)
+        for row in amortized:
+            ratio = f'{row["saving_multiple"]:.2f}x' if row["saving_multiple"] is not None else "н/д"
+            report.append(
+                f'| {row["tasks"]} | {row["pick_total"]} | {row["python_total"]} | '
+                f'{row["pick_per_task"]:.1f} | {row["python_per_task"]:.1f} | {ratio} |'
+            )
+        breakeven = break_even_tasks(vocab_cost, pick_task_cost, python_cost)
+        if breakeven is None:
+            report.append("\n**Точка окупаемости не достигается:** стоимость PICK на каждую задачу не ниже Python.")
+        else:
+            report.append(f"\nТочка окупаемости словаря: **{breakeven} задач** при указанных предположениях.")
+        report += ["",
+                   "## Проверка durable-выполнения",
+                   "",
+                   f"Первый запуск: {r1.status}; повторный запуск: {r2.status}; списаний у банка: {calls['charge']}; "
+                   f"verify: {verified['verified']}; событий в журнале: {verified['events']}.",
+                   "",
+                   "## Ограничения",
+                   "",
+                   "- Это измерение токенов, не цены в долларах: цены зависят от конкретной модели и тарифа.",
+                   "- Учитывается сериализованное содержимое словаря, но не системный промпт, история чата, ответы модели, "
+                   "повторные попытки и токены инструментов. Полный end-to-end учёт нужно добавить отдельно.",
+                   "- Python-файл и PICK-словарь не доказаны как семантически эквивалентные реализации; коэффициент нельзя "
+                   "трактовать как доказательство общего превосходства.",
+                   "- Если исправления требуют разных объёмов текста, следует считать реальные входные/выходные токены "
+                   "из API-телеметрии, а не предполагать полную пересылку."]
+        print("\n".join(report))
         print()
-        print(f"цикл Genesis+патч: {cycle_pick} ток. | классический Python x2 итерации: {cycle_py} ток. | выигрыш {cycle_py/cycle_pick:.1f}x")
-        print(f"исполнение: {r1.status} -> {r2.status}, charges={calls['charge']}, verified={verified['verified']}")
+        print(f"execution: {r1.status} -> {r2.status}, charges={calls['charge']}, verified={verified['verified']}")
         if "--write" in sys.argv:
             Path("docs/LIVE_CYCLE.md").write_text("\n".join(report) + "\n", encoding="utf-8")
             print("docs/LIVE_CYCLE.md обновлён")
