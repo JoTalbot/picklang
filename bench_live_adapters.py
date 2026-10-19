@@ -22,8 +22,8 @@ def solve(q):
 
 def solve(u):
     sub = db.create_sub(u)
-    message = mail.send(u, sub.id)
-    return {"sub": sub.id, "message": message.id}
+    message = mail.send(u, sub["id"])
+    return {"sub": sub["id"], "message": message["id"]}
 """
 ALLOWED_AST = {ast.Module, ast.FunctionDef, ast.arguments, ast.arg, ast.Return,
     ast.Assign, ast.Expr, ast.Call, ast.Name, ast.Load, ast.Store, ast.Constant,
