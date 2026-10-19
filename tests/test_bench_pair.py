@@ -37,10 +37,11 @@ def test_timeout_is_a_failed_row():
 
 def test_baseline_succeeds_when_given_a_realistic_timeout():
     tasks = [{"task": "fast", "input": {}}]
+    valid_json = "import json; print(json.dumps({'ok': True}))"
     report = run_pair(
         tasks,
-        adapter("print('{\"ok\": true}')")),
-        adapter("print('{\"ok\": true}')")),
+        adapter(valid_json),
+        adapter(valid_json),
         timeout=5,
     )
     assert report["pick"][0]["ok"] is True
@@ -49,8 +50,11 @@ def test_baseline_succeeds_when_given_a_realistic_timeout():
 
 def test_invalid_adapter_output_is_failed_not_crash():
     tasks = [{"task": "bad", "input": {}}]
-    report = run_pair(tasks, adapter("print('not json')"),
-                      adapter("print('{\"ok\": true}')")))
+    report = run_pair(
+        tasks,
+        adapter("print('not json')"),
+        adapter("import json; print(json.dumps({'ok': True}))"),
+    )
     assert report["pick"][0]["ok"] is False
     assert "not one JSON object" in report["pick"][0]["error"]
 
