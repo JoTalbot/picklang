@@ -1,7 +1,7 @@
 """Распределённый прогон Temporal: воркер — отдельный процесс.
 
-Пропускается без temporalio или если тестовый сервер недоступен в окружении
-(SKIP честно отличается от PASS: скрипт печатает исход, тест смотрит на него).
+Пропускается только если temporalio не установлен. Ошибки запуска/сервера
+не маскируются под SKIP: интеграционный тест должен завершиться PASS.
 """
 import subprocess
 import sys
@@ -18,9 +18,8 @@ def test_temporal_worker_in_separate_process():
         [sys.executable, str(root / "tools" / "temporal_distributed.py")],
         capture_output=True, text=True, timeout=240, cwd=root)
     out = proc.stdout + proc.stderr
-    if "SKIP" in out:
-        pytest.skip(out.strip().splitlines()[-1] if out.strip() else "недоступно")
-    assert "PASS" in out, out[-500:]
+    assert proc.returncode == 0, out[-1000:]
+    assert any(line.startswith("PASS:") for line in out.splitlines()), out[-1000:]
 
 
 def test_temporal_worker_restart_mid_workflow(tmp_path=None):
@@ -29,6 +28,5 @@ def test_temporal_worker_restart_mid_workflow(tmp_path=None):
         [sys.executable, str(root / "tools" / "temporal_restart.py")],
         capture_output=True, text=True, timeout=240, cwd=root)
     out = proc.stdout + proc.stderr
-    if "SKIP" in out:
-        pytest.skip(out.strip().splitlines()[-1] if out.strip() else "недоступно")
-    assert "PASS" in out, out[-500:]
+    assert proc.returncode == 0, out[-1000:]
+    assert any(line.startswith("PASS:") for line in out.splitlines()), out[-1000:]
