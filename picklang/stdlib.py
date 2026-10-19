@@ -35,7 +35,13 @@ def count(items: Any) -> int:
     return len(items)
 
 
-STDLIB = {"top": top, "fields": fields, "take": take, "keys": keys, "count": count}
+def tab(items):
+    """Табличная укладка списка словарей одной строкой заголовка (дешевле JSON)."""
+    from .serialize import to_compact
+    return to_compact(items)
+
+
+STDLIB = {"top": top, "fields": fields, "take": take, "keys": keys, "count": count, "tab": tab}
 
 
 def with_stdlib(registry: dict) -> dict:

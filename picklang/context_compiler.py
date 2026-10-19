@@ -13,8 +13,10 @@ from typing import Any
 
 def compile_context(task: str, contracts: dict[str, dict], vocab_aliases: list[str] | None = None,
                     done_when: list[str] | None = None) -> dict[str, Any]:
+    # Статичная часть (грамматика+контракты) — префиксом: провайдеры с prompt
+    # cache отдадут её на повторных задачах почти бесплатно; задача — в конце.
     lines = ["Ты пишешь намерение для генератора программ PICK. Верни только JSON намерения.",
-             f"Задача: {task}", "Доступные функции (других нет):"]
+             "Доступные функции (других нет):"]
     for name, spec in contracts.items():
         args = ", ".join(spec.get("args", []))
         ret = ", ".join(spec.get("returns", []))
@@ -23,9 +25,11 @@ def compile_context(task: str, contracts: dict[str, dict], vocab_aliases: list[s
         lines.append("Блоки словаря (use): " + ", ".join(vocab_aliases))
     if done_when:
         lines.append("Готово когда: " + "; ".join(done_when))
-    prompt = "\n".join(lines)
+    static_prefix = "\n".join(lines)
+    prompt = static_prefix + f"\nЗадача: {task}"
     return {"prompt": prompt,
             "digest": hashlib.sha256(prompt.encode()).hexdigest(),
+            "prefix_digest": hashlib.sha256(static_prefix.encode()).hexdigest(),
             "tokens": _tokens(prompt)}
 
 

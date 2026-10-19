@@ -86,6 +86,9 @@ class Context:
         })
         ex._completed[step_id] = result_ref
         ex._steps_done += 1
+        if ex.snapshot_every and ex._steps_done % ex.snapshot_every == 0:
+            snap_ref = ex.cas.put_json({"seq": len(ex.log.events), "completed": dict(ex._completed)})
+            ex.log.append("StateSnapshot", {"snapshot_ref": snap_ref, "steps": ex._steps_done})
         if ex.crash_after is not None and ex._steps_done >= ex.crash_after:
             raise SimulatedCrash(f"simulated crash after {ex._steps_done} committed activities")
         return result
@@ -135,11 +138,13 @@ class Context:
 
 class DurableExecutor:
     def __init__(self, workdir: str | Path, handlers: dict[str, Handler], crash_after: int | None = None,
-                 storage: str = "jsonl"):
+                 storage: str = "jsonl", snapshot_every: int | None = None):
         self.workdir = Path(workdir)
         self.handlers = handlers
         self.crash_after = crash_after
         self.storage = storage  # "jsonl" | "sqlite" — цепочка и гарантии те же
+        self.snapshot_every = snapshot_every  # П.1: снимок completed-карты каждые N шагов
+        self.snapshot_used = False
         self.cas = ContentAddressedStore(self.workdir / "cas")
         self.log: EventLog | None = None  # type: ignore
         self._completed: dict[str, str] = {}
@@ -155,7 +160,21 @@ class DurableExecutor:
             self.log = EventLog(self.workdir / "executions" / execution_id / "events.jsonl")
         self._completed = {}
         self._signals = {}
-        for ev in self.log.events:
+        self.snapshot_used = False
+        events = self.log.events
+        start = 0
+        # П.1: последний снимок даёт completed-карту сразу; обрабатываем только хвост после него
+        for i in range(len(events) - 1, -1, -1):
+            if events[i]["type"] == "StateSnapshot":
+                try:
+                    snap = self.cas.get_json(events[i]["data"]["snapshot_ref"])
+                    self._completed = dict(snap["completed"])
+                    self.snapshot_used = True
+                    start = i + 1
+                except Exception:
+                    pass
+                break
+        for ev in events[start:]:
             if ev["type"] == "ActivityCompleted":
                 self._completed[ev["data"]["step"]] = ev["data"]["result_ref"]
             elif ev["type"] == "SignalReceived":

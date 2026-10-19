@@ -222,12 +222,29 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
                             env[target] = value
             elif step.kind == "loop":
                 items = _eval(step.expr, env, registry, activity_hook, trace, state)
-                for item in items:
-                    env[step.loop_var] = item
-                    if step.body.kind in ("assign", "expr"):
-                        execute_assign(step.body)
-                    else:
-                        raise PickRuntimeError("в теле for поддержан только шаг-вызов или присваивание")
+                body = step.body
+                # П.6: если у функции тела есть batch-вариант (fn.batch в реестре),
+                # вся коллекция уходит одним вызовом вместо roundtrip на элемент.
+                batch_fn = None
+                if body.kind == "assign" and body.expr[0] == "call":
+                    cand = registry.get(body.expr[1] + ".batch")
+                    if cand is not None:
+                        batch_fn = (body.expr[1] + ".batch", cand)
+                if batch_fn is not None:
+                    name, fn = batch_fn
+                    trace.append(name)
+                    args = [_eval(a, env, registry, activity_hook, trace, state) for a in body.expr[2][1:]]
+                    results = fn(list(items), *args)
+                    if body.target:
+                        env[body.target] = results
+                    env[step.loop_var] = items[-1] if items else None
+                else:
+                    for item in items:
+                        env[step.loop_var] = item
+                        if body.kind in ("assign", "expr"):
+                            execute_assign(body)
+                        else:
+                            raise PickRuntimeError("в теле for поддержан только шаг-вызов или присваивание")
             elif step.kind in ("assign", "expr"):
                 execute_assign(step)
             elif step.kind == "guard":

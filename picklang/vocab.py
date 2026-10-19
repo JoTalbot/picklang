@@ -30,6 +30,12 @@ class Vocabulary:
     def _save(self) -> None:
         self.index_path.write_text(json.dumps(self.index, ensure_ascii=False, indent=1), encoding="utf-8")
 
+    @staticmethod
+    def alias_cost(alias: str) -> int:
+        """Сколько токенов платит модель за имя блока при каждом вызове."""
+        from .result_guard import estimate_tokens
+        return estimate_tokens(f"&{alias}()")
+
     def add(self, alias: str, params: list[str], body: str) -> str:
         """Зарегистрировать блок. Возвращает CAS-ref тела (digest)."""
         ref = self.cas.put_text(body)
