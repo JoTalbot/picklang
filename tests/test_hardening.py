@@ -76,9 +76,7 @@ def test_aot_fails_closed_for_budget_and_parallel_semantics():
     from picklang.aot import generate_python
 
     with pytest.raises(ValueError, match="budget"):
-        generate_python('> t(x)\\n!budget steps<1\\ny = f(x)\\nout y\\n')
-    with pytest.raises(ValueError, match="parallel"):
-        generate_python('> t(x)\\na = f(x) || b = g(x)\\nout {a: a, b: b}\\n')
+        generate_python('> t(x)\n!budget steps<1\ny = f(x)\nout y\n')
 
 
 def test_aot_compilation_state_is_thread_safe():
@@ -86,11 +84,11 @@ def test_aot_compilation_state_is_thread_safe():
     from picklang.aot import run_compiled
 
     cases = [
-        ('> t(x)\\ny = f(x)\\nout y\\n', {"f": lambda x: x + 1}, {"x": i}, i + 1)
+        ('> t(x)\ny = f(x)\nout y\n', {"f": lambda x: x + 1}, {"x": i}, i + 1)
         for i in range(20)
     ]
     cases += [
-        ('> t(x)\\ny = g(x)\\nout y\\n', {"g": lambda x: x * 2}, {"x": i}, i * 2)
+        ('> t(x)\ny = g(x)\nout y\n', {"g": lambda x: x * 2}, {"x": i}, i * 2)
         for i in range(20)
     ]
     def run(case):

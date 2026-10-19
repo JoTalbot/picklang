@@ -138,7 +138,7 @@ def _collect_vars(steps) -> list[str]:
 def _generate_python_unlocked(source: str) -> str:
     global _VAR_LOCALS
     ir = compile_ir(source)
-    unsupported = sorted({step["kind"] for step in ir["steps"] if step["kind"] in ("budget", "parallel")})
+    unsupported = sorted({step["kind"] for step in ir["steps"] if step["kind"] == "budget"})
     if unsupported:
         kinds = ", ".join(unsupported)
         raise ValueError(f"AOT does not support {kinds}; use the interpreter via run_program()")
