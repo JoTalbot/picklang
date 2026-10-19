@@ -183,7 +183,8 @@ jobs:
             paired_model="${{ inputs.paired_model || 'openai/gpt-oss-20b' }}"
             repeats="${{ inputs.paired_repeats || '3' }}"
           fi
-          export PICK_LIVE_MODEL_TIERS="[[$paired_model]]"
+          export PICK_LIVE_MODEL_TIERS="[[\"$paired_model\"]]"
+          python -c 'import json, os; tiers=json.loads(os.environ["PICK_LIVE_MODEL_TIERS"]); assert tiers == [["'"$paired_model"'"]], tiers'
           echo "Paired A/B model: $paired_model"
           echo "Paired A/B repeats: $repeats"
           python bench_pair.py \
