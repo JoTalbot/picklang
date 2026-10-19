@@ -36,7 +36,8 @@ def main():
     if aot:
         rows.append(("AOT против интерпретатора", f"{interp / aot:.1f}x быстрее"))
 
-    # batch-цикл против поэлементного
+    # batch-цикл против поэлементного (прогрев токенизатора — отдельно, не в замере)
+    run_program(src, reg, {"x": 1}, prefer_aot=False)
     items = list(range(200))
     per_item = {"ship": lambda i: i}
     t0 = time.perf_counter()

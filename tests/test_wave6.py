@@ -134,3 +134,26 @@ def test_aot_loop_parallel_parity():
     reg = {"dbl": lambda i: i * 2, "f": lambda x: 10, "g": lambda x: 20}
     out, _ = run_compiled(src, reg, {"xs": [1, 3]})
     assert out == {"y": 6, "a": 10}
+
+
+def test_sqlite_compaction_resume_still_verifies(tmp_path):
+    from durable_weave import DurableExecutor
+    ex = DurableExecutor(tmp_path, {"inc": lambda p: {"n": 1}}, storage="sqlite", snapshot_every=5)
+    def wf(ctx, inp):
+        return [ctx.execute_activity("inc", {}, idempotency_key=f"k{i}") for i in range(12)]
+    ex.run("c1", wf, {})
+    info = ex.log.compact()
+    assert info["archived"] > 0
+    ex2 = DurableExecutor(tmp_path, {"inc": lambda p: {"n": 1}}, storage="sqlite", snapshot_every=5)
+    r = ex2.run("c1", wf, {})
+    assert r.status == "COMPLETED" and ex2.verify("c1")["verified"]
+
+
+def test_auto_aot_fast_path_parity():
+    src = "> t(x)\ny = f(x)\nout y\n"
+    reg = {"f": lambda x: x + 1}
+    assert run_program(src, reg, {"x": 1})[0] == run_program(src, reg, {"x": 1}, prefer_aot=False)[0] == 2
+    # с компенсацией быстрый путь запрещён — работает интерпретатор с сагой
+    src2 = "> t(x)\ny = f(x) ! undo(y)\nout y\n"
+    reg2 = {"f": lambda x: 5, "undo": lambda y: None}
+    assert run_program(src2, reg2, {"x": 1})[0] == 5

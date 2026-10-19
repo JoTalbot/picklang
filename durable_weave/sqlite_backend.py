@@ -31,7 +31,9 @@ class SQLiteEventLog:
         return self.events[-1]["hash"] if self.events else GENESIS
 
     def append(self, type_: str, data: dict[str, Any]) -> dict[str, Any]:
-        event = {"seq": len(self.events), "type": type_, "data": data, "prev": self.last_hash}
+        # seq — не длина списка: после компакции список короче, а номера обязаны расти
+        next_seq = self.events[-1]["seq"] + 1 if self.events else 0
+        event = {"seq": next_seq, "type": type_, "data": data, "prev": self.last_hash}
         event["hash"] = event_hash(self.last_hash, event)
         with self.db:
             self.db.execute("INSERT INTO events VALUES (?,?,?,?,?)",
@@ -44,13 +46,42 @@ class SQLiteEventLog:
         out = []
         with self.db:
             for type_, data in items:
-                event = {"seq": len(self.events), "type": type_, "data": data, "prev": self.last_hash}
+                next_seq = self.events[-1]["seq"] + 1 if self.events else 0
+                event = {"seq": next_seq, "type": type_, "data": data, "prev": self.last_hash}
                 event["hash"] = event_hash(self.last_hash, event)
                 self.db.execute("INSERT INTO events VALUES (?,?,?,?,?)",
                                 (event["seq"], type_, json.dumps(data, ensure_ascii=False), event["prev"], event["hash"]))
                 self.events.append(event)
                 out.append(event)
         return out
+
+    def compact(self) -> dict:
+        """Архивировать события до последнего StateSnapshot включительно.
+
+        Снимок становится якорем цепочки: события до него уезжают в таблицу
+        archive, журнал продолжает верифицироваться от хэша снимка.
+        """
+        snap_idx = None
+        for i in range(len(self.events) - 1, -1, -1):
+            if self.events[i]["type"] == "StateSnapshot":
+                snap_idx = i
+                break
+        if snap_idx is None or snap_idx == 0:
+            return {"archived": 0, "kept": len(self.events)}
+        anchor = self.events[snap_idx]
+        archived = self.events[:snap_idx + 1]
+        with self.db:
+            self.db.execute("CREATE TABLE IF NOT EXISTS archive(seq INTEGER, type TEXT, data TEXT, prev TEXT, hash TEXT)")
+            for ev in archived:
+                self.db.execute("INSERT INTO archive VALUES (?,?,?,?,?)",
+                                (ev["seq"], ev["type"], json.dumps(ev["data"], ensure_ascii=False), ev["prev"], ev["hash"]))
+            self.db.execute("DELETE FROM events WHERE seq <= ?", (anchor["seq"],))
+            self.db.execute("INSERT INTO events VALUES (?,?,?,?,?)",
+                            (anchor["seq"], anchor["type"], json.dumps(anchor["data"], ensure_ascii=False), anchor["prev"], anchor["hash"]))
+        self.events = self.events[snap_idx:]
+        self.db.execute("VACUUM")
+        self.db.commit()
+        return {"archived": len(archived) - 1, "kept": len(self.events), "anchor_hash": anchor["hash"]}
 
     def verify_sampled(self, every: int = 10) -> tuple[bool, str]:
         """Ленивая проверка: края и каждое N-е событие вместо полной цепочки."""
@@ -70,6 +101,12 @@ class SQLiteEventLog:
         prev = GENESIS
         for i, ev in enumerate(self.events):
             body = {k: v for k, v in ev.items() if k != "hash"}
+            if i == 0 and ev["type"] == "StateSnapshot":
+                # якорь после компакции: его собственный хэш — старт цепочки
+                if event_hash(ev.get("prev", GENESIS), body) != ev.get("hash"):
+                    return False, "event 0: якорный снимок повреждён"
+                prev = ev["hash"]
+                continue
             if ev.get("prev") != prev or event_hash(prev, body) != ev.get("hash"):
                 return False, f"event {i}: цепочка нарушена"
             prev = ev["hash"]
