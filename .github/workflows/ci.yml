@@ -68,8 +68,8 @@ jobs:
   tests:
     name: Unit tests and package checks
     if: github.repository == 'JoTalbot/testing' && github.ref == 'refs/heads/main'
-    # Public repository: hosted runners avoid indefinite waits for an offline ARM64 runner.
-    runs-on: ubuntu-latest
+    # Trusted main-branch CI uses the repository's Linux ARM64 self-hosted runner.
+    runs-on: [self-hosted, linux, arm64]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -80,7 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$GITHUB_REPOSITORY" != "JoTalbot/testing" || "$GITHUB_REF" != "refs/heads/main" ]]; then
-            echo "::error::Only JoTalbot/testing on main is allowed to use this self-hosted runner."
+            echo "::error::Only JoTalbot/testing on main is allowed to use this trusted runner."
             exit 1
           fi
           latest_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
@@ -134,7 +134,7 @@ jobs:
       needs.tests.result == 'success' &&
       (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_live))
     # Live provider secrets are used only on trusted main-branch pushes/dispatches.
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, arm64]
     timeout-minutes: 25
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_TOKEN }}
@@ -327,7 +327,7 @@ jobs:
       github.event_name == 'push' &&
       needs.tests.result == 'success' &&
       needs.live-openrouter.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, arm64]
     timeout-minutes: 5
     permissions:
       contents: write
