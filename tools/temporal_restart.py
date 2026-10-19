@@ -56,14 +56,21 @@ async def amain() -> int:
                 PickWorkflow.run, args=[compile_ir(src), {"user": "u1"}],
                 id="pick-restart-1", task_queue=QUEUE)
             await asyncio.sleep(2)  # workflow дошёл до @wait на воркере-1
-            w1.terminate(); w1.wait(timeout=10)
+            w1.terminate()
+            w1.wait(timeout=10)
             print(f"воркер-1 (pid={pid1}) убит, workflow ждёт сигнал без воркера", flush=True)
             w2, pid2 = spawn_worker(target)
             try:
                 await handle.signal(PickWorkflow.pick_signal, {"name": "approval", "value": True})
                 result = await handle.result()
             finally:
-                w2.terminate()
+                if w2.poll() is None:
+                    w2.terminate()
+                try:
+                    w2.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    w2.kill()
+                    w2.wait(timeout=10)
         ok = result == f"tx-{pid2}" and pid1 != pid2
         print(f"{'PASS' if ok else 'FAIL'}: после рестарта воркера ({pid1} -> {pid2}) workflow завершился, результат: {result}")
         return 0 if ok else 1

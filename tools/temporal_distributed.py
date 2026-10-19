@@ -7,7 +7,7 @@
 хост-функции живут на воркере, @wait работает сигналом извне.
 
 Запуск: python3 tools/temporal_distributed.py
-Исходы: PASS / SKIP (нет temporalio или сервер не поднялся) — как в smoke.
+Исходы: PASS; отсутствие SDK или ошибки запуска сервера считаются ошибкой интеграционной проверки.
 """
 import asyncio
 import os
@@ -68,7 +68,13 @@ async def amain() -> int:
                 await handle.signal(PickWorkflow.pick_signal, {"name": "approval", "value": True})
                 result = await handle.result()
             finally:
-                proc.terminate()
+                if proc.poll() is None:
+                    proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=10)
         ok = result["tx"] == f"tx-{worker_pid}" and result["y"] == 6 and worker_pid != os.getpid()
         print(f"{'PASS' if ok else 'FAIL'}: клиент pid={os.getpid()}, активности исполнил "
               f"воркер pid={worker_pid} в другом процессе, результат: {result}")

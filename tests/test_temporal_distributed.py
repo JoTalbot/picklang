@@ -22,7 +22,7 @@ def test_temporal_worker_in_separate_process():
     assert any(line.startswith("PASS:") for line in out.splitlines()), out[-1000:]
 
 
-def test_temporal_worker_restart_mid_workflow(tmp_path=None):
+def test_temporal_worker_restart_mid_workflow():
     root = Path(__file__).parent.parent
     proc = subprocess.run(
         [sys.executable, str(root / "tools" / "temporal_restart.py")],
