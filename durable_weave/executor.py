@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .cas import ContentAddressedStore, canonical_json, sha256_hex
+from .locking import ExecutionBusy, execution_lock
 from .sqlite_backend import SQLiteEventLog
 
 
@@ -35,7 +36,7 @@ class WorkflowWaiting(Exception):
 @dataclass
 class ExecutionResult:
     execution_id: str
-    status: str  # COMPLETED | FAILED | WAITING | CRASHED
+    status: str  # COMPLETED | FAILED | WAITING | CRASHED | BUSY
     output: Any = None
     digest: str = ""
     waiting_for: str | None = None
@@ -209,6 +210,16 @@ class DurableExecutor:
                 self._signals[ev["data"]["name"]] = ev["data"]["payload"]
 
     def run(self, execution_id: str, workflow: Callable[[Context, Any], Any], input_: Any) -> ExecutionResult:
+        # Один писатель на исполнение: иначе два процесса переигрывают журнал до
+        # первого незакоммиченного шага и оба выполняют его обработчик.
+        try:
+            with execution_lock(self.workdir, execution_id):
+                return self._run_locked(execution_id, workflow, input_)
+        except ExecutionBusy as busy:
+            return ExecutionResult(execution_id, "BUSY", error=str(busy))
+
+    def _run_locked(self, execution_id: str, workflow: Callable[[Context, Any], Any],
+                    input_: Any) -> ExecutionResult:
         self._load(execution_id)
         assert self.log is not None
         if not any(e["type"] == "WorkflowStarted" for e in self.log.events):
@@ -230,6 +241,11 @@ class DurableExecutor:
         return ExecutionResult(execution_id, "COMPLETED", output=output, digest=self.log.last_hash)
 
     def deliver_signal(self, execution_id: str, name: str, payload: Any) -> None:
+        # Сигнал дописывает журнал: тот же эксклюзивный доступ, что и у run().
+        with execution_lock(self.workdir, execution_id):
+            self._deliver_signal_locked(execution_id, name, payload)
+
+    def _deliver_signal_locked(self, execution_id: str, name: str, payload: Any) -> None:
         self._load(execution_id)
         assert self.log is not None
         # Дубликат сигнала с тем же содержимым — no-op (идемпотентная доставка).
