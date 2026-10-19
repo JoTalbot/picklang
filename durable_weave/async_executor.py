@@ -19,16 +19,26 @@ class AsyncDurableExecutor(DurableExecutor):
                  snapshot_every: int | None = None):
         super().__init__(workdir, handlers, storage="sqlite", snapshot_every=snapshot_every)
 
+    _execution_id_current: str | None = None
+
+    def _load(self, execution_id: str) -> None:  # type: ignore[override]
+        super()._load(execution_id)
+        self._execution_id_current = execution_id
+
     def _cached(self, step_id: str):
         stored = self.cas.get_json(self._completed[step_id])
         return stored.get("result") if isinstance(stored, dict) and "result" in stored else stored
 
     async def call(self, name: str, payload: dict, idempotency_key: str):
         assert self.log is not None
-        step_id = f"{name}:{idempotency_key}"
+        seq = self._seq_counter
+        self._seq_counter += 1
+        step_id = f"{seq}:{name}:{idempotency_key}"
         if step_id in self._completed:
             return self._cached(step_id)
-        result = await self.handlers[name]({**payload, "_idempotency_key": idempotency_key})
+        result = await self.handlers[name]({**payload, "_idempotency_key": step_id,
+                                            "_requested_key": idempotency_key,
+                                            "_execution_id": self._execution_id_current})
         self._commit_activity(step_id, name, payload, result, idempotency_key)
         return result
 
@@ -36,7 +46,7 @@ class AsyncDurableExecutor(DurableExecutor):
         results: list[Any] = [None] * len(calls)
         pending: dict[int, tuple[str, dict, str]] = {}
         for i, (name, payload, key) in enumerate(calls):
-            step_id = f"{name}:{key}"
+            step_id = f"par{i}:{name}:{key}"
             if step_id in self._completed:
                 results[i] = self._cached(step_id)
             else:
@@ -44,11 +54,13 @@ class AsyncDurableExecutor(DurableExecutor):
         if pending:
             async def run_one(item):
                 i, (name, payload, key) = item
-                return i, await self.handlers[name]({**payload, "_idempotency_key": key})
+                return i, await self.handlers[name]({**payload, "_idempotency_key": f"par{i}:{name}:{key}",
+                                                     "_requested_key": key,
+                                                     "_execution_id": self._execution_id_current})
             done = dict(await asyncio.gather(*(run_one(it) for it in pending.items())))
             for i in pending:  # коммиты — строго в объявленном порядке
                 name, payload, key = pending[i]
-                self._commit_activity(f"{name}:{key}", name, payload, done[i], key)
+                self._commit_activity(f"par{i}:{name}:{key}", name, payload, done[i], key)
                 results[i] = done[i]
         return list(results)
 

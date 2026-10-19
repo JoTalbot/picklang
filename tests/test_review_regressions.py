@@ -69,3 +69,59 @@ def test_done_when_failure_rolls_back_saga():
     with pytest.raises(Exception):
         run_program(src, registry, {}, prefer_aot=False)
     assert calls == ["hold", "free"], calls
+
+
+# --- 2. Идемпотентность: ключ должен быть уникален на шаг ------------------
+
+def test_idempotency_key_is_unique_per_step(tmp_path):
+    """Контракт «дедуплицируй по _idempotency_key» не должен схлопывать разные вызовы."""
+    from durable_weave.executor import DurableExecutor
+
+    seen: dict[str, int] = {}
+    requested: list = []
+
+    def charge(payload):
+        requested.append(payload.get("_requested_key"))
+        key = payload["_idempotency_key"]
+        if key not in seen:
+            seen[key] = payload["args"][0]
+        return {"tx": f"tx-{seen[key]}"}
+
+    executor = DurableExecutor(tmp_path, {"charge": charge})
+
+    def wf(ctx, inp):
+        a = ctx.execute_activity("charge", {"args": [10]}, idempotency_key="charge")
+        b = ctx.execute_activity("charge", {"args": [20]}, idempotency_key="charge")
+        return {"x": a["tx"], "y": b["tx"]}
+
+    result = executor.run("e1", wf, {})
+    assert result.output == {"x": "tx-10", "y": "tx-20"}
+    assert requested == ["charge", "charge"]  # ключ вызывающего виден отдельно
+
+    # Replay того же журнала: обработчик не вызывается повторно, результат стабилен.
+    replay = DurableExecutor(tmp_path, {"charge": charge}).run("e1", wf, {})
+    assert replay.output == result.output
+    assert len(seen) == 2 and requested == ["charge", "charge"]
+
+
+def test_async_idempotency_key_is_unique_per_call(tmp_path):
+    import asyncio
+
+    from durable_weave.async_executor import AsyncDurableExecutor
+
+    seen: dict[str, int] = {}
+
+    async def handler(payload):
+        key = payload["_idempotency_key"]
+        if key not in seen:
+            seen[key] = payload["v"]
+        return seen[key]
+
+    async def main():
+        executor = AsyncDurableExecutor(tmp_path, {"a": handler})
+        executor._load("e1")
+        first = await executor.call("a", {"v": 1}, "a")
+        second = await executor.call("a", {"v": 2}, "a")
+        assert (first, second) == (1, 2)
+
+    asyncio.run(main())
