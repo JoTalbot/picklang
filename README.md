@@ -97,6 +97,13 @@ Temporal нужен для долгих workflow, внешних сигнало�
 
 ## Живой A/B каскадов
 
+Live evaluation uses free OpenRouter model tiers by default. If the free-model daily quota is exhausted,
+the run stops attempting further tasks after the first provider 429 to avoid wasting requests.
+For an explicitly budgeted paid-model run, configure repository variable `PICK_LIVE_MODEL_TIERS`
+as JSON arrays of model IDs ordered by fallback tier, for example
+`[["provider/cheap-model"],["provider/fallback-model"]]`. Choose models and budget deliberately;
+the default remains free-only.
+
 Sequential против hedged на 3 задачах (`docs/LIVE_HEDGE.md`): оба 3/3,
 hedged 42 с суммарно против 50 с и 5556 токенов против 6294. На шумном
 free tier это тенденция: hedged страхует от хвоста задержек (в прошлом

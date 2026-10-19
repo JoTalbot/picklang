@@ -86,6 +86,7 @@ jobs:
     timeout-minutes: 25
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_TOKEN }}
+      PICK_LIVE_MODEL_TIERS: ${{ vars.PICK_LIVE_MODEL_TIERS }}
     steps:
       - uses: actions/checkout@v4
         with:
