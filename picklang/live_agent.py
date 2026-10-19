@@ -6,9 +6,11 @@
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
-import urllib.request
+import time
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +25,42 @@ DEFAULT_MODELS = [
 
 class LLMError(Exception):
     pass
+
+
+def _post_with_deadline(url: str, body: bytes, headers: dict, deadline_seconds: float) -> dict:
+    """POST с ОБЩИМ дедлайном на весь запрос.
+
+    Раньше стоял urllib timeout: он считается на каждое чтение сокета,
+    и медленно капающий ответ (живой случай: 423 с при "таймауте 45 с")
+    его никогда не пробивал. Теперь перед каждым чтением сокету выставляется
+    оставшееся время, а по истечении дедлайна — жёсткая ошибка.
+    """
+    parsed = urllib.parse.urlparse(url)
+    conn_cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+    deadline = time.monotonic() + deadline_seconds
+    conn = conn_cls(parsed.hostname, parsed.port, timeout=deadline_seconds)
+    try:
+        conn.request("POST", parsed.path or "/", body=body, headers=headers)
+        resp = conn.getresponse()
+        chunks = []
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"общий дедлайн {deadline_seconds} с исчерпан")
+            if conn.sock is not None:
+                conn.sock.settimeout(remaining)
+            # read1, не read: буферизованный read ждал бы буфер целиком,
+            # обновляя сокет-таймаут на каждый капнувший кусок, — дедлайн бы не сработал
+            chunk = resp.read1(65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        raw = b"".join(chunks)
+        if resp.status >= 400:
+            raise http.client.HTTPException(f"HTTP {resp.status}: {raw[:200]!r}")
+        return json.loads(raw)
+    finally:
+        conn.close()
 
 
 def load_key(key_file: str | None = None) -> str:
@@ -46,12 +84,11 @@ def chat(key: str, model: str, messages: list[dict], timeout: int = 180,
         # constrained decoding: провайдер не даст вернуть JSON вне схемы
         payload["response_format"] = {"type": "json_schema", "json_schema": json_schema}
     body = json.dumps(payload).encode()
-    req = urllib.request.Request(API, data=body, headers={
+    headers = {
         "Authorization": f"Bearer {key}", "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/JoTalbot/testing", "X-Title": "pick-live-cycle"})
+        "HTTP-Referer": "https://github.com/JoTalbot/testing", "X-Title": "pick-live-cycle"}
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.load(resp)
+        data = _post_with_deadline(API, body, headers, timeout)
     except Exception as e:
         raise LLMError(f"{model}: {type(e).__name__}: {str(e)[:300]}") from e
     try:

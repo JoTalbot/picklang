@@ -18,17 +18,11 @@ def test_parse_cache_correct():
 def test_schema_in_chat_and_router(monkeypatch):
     import picklang.live_agent as la
     captured = {}
-    class FakeResp:
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def read(self):
-            import json as j
-            return j.dumps({"choices": [{"message": {"content": "{}"}}], "usage": {"total_tokens": 3,
-                            "completion_tokens_details": {"reasoning_tokens": 2}}}).encode()
-    def fake_urlopen(req, timeout=None):
-        captured["body"] = req.data.decode()
-        return FakeResp()
-    monkeypatch.setattr(la.urllib.request, "urlopen", fake_urlopen)
+    def fake_post(url, body, headers, timeout):
+        captured["body"] = body.decode()
+        return {"choices": [{"message": {"content": "{}"}}], "usage": {"total_tokens": 3,
+                        "completion_tokens_details": {"reasoning_tokens": 2}}}
+    monkeypatch.setattr(la, "_post_with_deadline", fake_post)
     from picklang.schema import intent_schema
     la.chat("k", "m", [{"role": "user", "content": "x"}], json_schema=intent_schema(),
             max_completion_tokens=100, reasoning_max_tokens=50)

@@ -175,3 +175,43 @@ def test_aot_batch_loop_and_donewhen_via_fast_path():
         raise AssertionError("ждался TaskNotDone")
     except TaskNotDone:
         pass
+
+
+def test_chat_total_deadline_against_dripping_server():
+    import http.server
+    import threading
+    import time as _time
+
+    from picklang import live_agent
+
+    class Drip(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = b'{"choices": [{"message": {"content": "x"}}], "usage": {}}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            for i in range(0, len(body), 4):  # капаем по 4 байта раз в 0.25 с: полный ответ ~4 с
+                try:
+                    self.wfile.write(body[i:i + 4]); self.wfile.flush()
+                except BrokenPipeError:
+                    break
+                _time.sleep(0.25)
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Drip)
+    th = threading.Thread(target=srv.serve_forever, daemon=True); th.start()
+    old = live_agent.API
+    live_agent.API = f"http://127.0.0.1:{srv.server_address[1]}/api"
+    try:
+        t0 = _time.monotonic()
+        try:
+            live_agent.chat("k", "m", [{"role": "user", "content": "hi"}], timeout=1)
+            raise AssertionError("ждался дедлайн")
+        except live_agent.LLMError as e:
+            assert "Timeout" in str(e) or "дедлайн" in str(e)
+        assert _time.monotonic() - t0 < 3.0  # без общего дедлайна тут было бы ~4+ с
+    finally:
+        live_agent.API = old
+        srv.shutdown()
