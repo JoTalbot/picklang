@@ -125,3 +125,30 @@ def test_async_idempotency_key_is_unique_per_call(tmp_path):
         assert (first, second) == (1, 2)
 
     asyncio.run(main())
+
+
+# --- 3. Диагностики несут level; live-валидатор реально отбрасывает ----------
+
+def test_check_diagnostics_carry_level():
+    from picklang.check import check_effects, check_source
+
+    registry = {"bank.charge": lambda u, a: {}}
+    errors = check_source("> t(u)\nx = nope.fn(u)\nout x\n", registry)
+    assert errors and all(d["level"] == "error" for d in errors)
+    assert check_source("> t(u)\nx = bank.charge(u, 1)\nout x\n", registry) == []
+    warnings = check_effects("> t(u)\nx = bank.charge(u, 1) @fx money\nout x\n")
+    assert warnings and all(d["level"] == "warning" for d in warnings)
+
+
+def test_live_validator_rejects_unknown_function_before_execution():
+    """make_validator заявлен как «парсинг + check + исполнение»: check должен работать."""
+    from eval_live_cascade import TASKS, make_validator
+
+    task = next(t for t in TASKS if t["name"] == "charge_tx")
+    calls: list[int] = []
+    task = {**task, "registry": {"bank.charge": lambda u, a: calls.append(1) or {"ok": True, "tx": "t1"}}}
+    validator = make_validator(task)
+
+    assert validator("> t(u)\np = bank.charg(u, 5)\nout p.tx\n") is False
+    assert calls == [], "программа не должна исполняться после статической ошибки"
+    assert validator("> t(u)\np = bank.charge(u, 5)\nout p.tx\n") is True

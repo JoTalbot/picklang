@@ -57,7 +57,7 @@ def main(argv=None) -> int:
         src = _read(args.file)
         diags = check_source(src) + check_effects(src)
         print(json.dumps(diags, ensure_ascii=False, indent=1) if diags else "OK: замечаний нет")
-        return 1 if any(d["code"].startswith("UNDEFINED") for d in diags) else 0
+        return 1 if any(d.get("level") == "error" for d in diags) else 0
     if args.cmd == "fmt":
         print(format_source(_read(args.file)), end="")
         return 0

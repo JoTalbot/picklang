@@ -4,6 +4,7 @@
 неизвестные функции, неверную арность, использование переменных до привязки,
 обращение к полям незаданных значений, отсутствие out, дубли цели.
 Диагностики структурированы и, где возможно, несут готовый патч (см. fix.py).
+Каждая несёт `level`: `error` — исполнять нельзя, `warning` — исполнять можно.
 """
 from __future__ import annotations
 
@@ -73,7 +74,8 @@ def check_ir(ir: dict[str, Any], registry: dict | None = None) -> list[dict[str,
             goals += 1
             defined.update(step.get("params", []))
             if goals > 1:
-                diags.append({"line": line, "code": "DUP_GOAL", "message": "цель > ... объявлена повторно"})
+                diags.append({"line": line, "level": "error", "code": "DUP_GOAL",
+                              "message": "цель > ... объявлена повторно"})
         # expr шага проверяется до привязки цели, компенсация — после:
         # она исполняется позже и законно ссылается на результат шага (p.tx).
         exprs = [step[k] for k in ("expr", "fail") if k in step]
@@ -83,30 +85,30 @@ def check_ir(ir: dict[str, Any], registry: dict | None = None) -> list[dict[str,
         for expr in exprs:
             for var in _expr_vars(expr):
                 if var not in defined:
-                    diags.append({"line": line, "code": "UNDEFINED_VAR",
+                    diags.append({"line": line, "level": "error", "code": "UNDEFINED_VAR",
                                   "message": f"переменная '{var}' используется до привязки"})
             for name, argc in _expr_calls(expr):
                 if registry is not None and name not in registry:
                     close = difflib.get_close_matches(name, list(registry), n=1)
-                    diags.append({"line": line, "code": "UNKNOWN_FN",
+                    diags.append({"line": line, "level": "error", "code": "UNKNOWN_FN",
                                   "message": f"функция '{name}' не зарегистрирована хостом",
                                   "suggestion": close[0] if close else None})
                 elif name in arities:
                     lo, hi = arities[name]
                     if not (lo <= argc <= hi):
-                        diags.append({"line": line, "code": "ARITY",
+                        diags.append({"line": line, "level": "error", "code": "ARITY",
                                       "message": f"'{name}' ждёт {lo}..{hi} аргументов, дано {argc}"})
         if step["kind"] == "assign" and step.get("target"):
             defined.add(step["target"])
         if "compensation" in step:
             for var in _expr_vars(step["compensation"]):
                 if var not in defined:
-                    diags.append({"line": line, "code": "UNDEFINED_VAR",
+                    diags.append({"line": line, "level": "error", "code": "UNDEFINED_VAR",
                                   "message": f"переменная '{var}' используется до привязки"})
             for name, argc in _expr_calls(step["compensation"]):
                 if registry is not None and name not in registry:
                     close = difflib.get_close_matches(name, list(registry), n=1)
-                    diags.append({"line": line, "code": "UNKNOWN_FN",
+                    diags.append({"line": line, "level": "error", "code": "UNKNOWN_FN",
                                   "message": f"функция '{name}' не зарегистрирована хостом",
                                   "suggestion": close[0] if close else None})
         if step["kind"] == "wait":
@@ -114,7 +116,8 @@ def check_ir(ir: dict[str, Any], registry: dict | None = None) -> list[dict[str,
         if step["kind"] == "out":
             has_out = True
     if not has_out:
-        diags.append({"line": 0, "code": "NO_OUT", "message": "в программе нет out — результат не определён"})
+        diags.append({"line": 0, "level": "error", "code": "NO_OUT",
+                      "message": "в программе нет out — результат не определён"})
     return diags
 
 
@@ -139,7 +142,7 @@ def check_contracts(source: str, contracts: dict[str, dict]) -> list[dict[str, A
             produced_by[step.get("target")] = expr["call"]
             spec = contracts.get(expr["call"])
             if spec and "args" in spec and len(expr.get("args", [])) != len(spec["args"]):
-                diags.append({"line": step["line"], "code": "CONTRACT_ARITY",
+                diags.append({"line": step["line"], "level": "error", "code": "CONTRACT_ARITY",
                               "message": f"{expr['call']} ждёт аргументы {spec['args']}"})
         def walk(e):
             if isinstance(e, dict):
@@ -148,7 +151,7 @@ def check_contracts(source: str, contracts: dict[str, dict]) -> list[dict[str, A
                     fn = produced_by.get(root)
                     spec = contracts.get(fn or "", {})
                     if fn and spec.get("returns") and field not in spec["returns"]:
-                        diags.append({"line": step["line"], "code": "UNKNOWN_FIELD",
+                        diags.append({"line": step["line"], "level": "warning", "code": "UNKNOWN_FIELD",
                                       "message": f"у результата {fn} нет поля .{field}; есть: {spec['returns']}"})
                 for v in e.values():
                     if isinstance(v, dict): walk(v)
@@ -164,7 +167,7 @@ def check_contracts(source: str, contracts: dict[str, dict]) -> list[dict[str, A
 def check_effects(source: str) -> list[dict[str, Any]]:
     """П.5 — Денежные/необратимые шаги без компенсации получают предупреждение."""
     from .parser import parse
-    return [{"line": s.line, "code": "EFFECT_NO_COMPENSATION",
+    return [{"line": s.line, "level": "warning", "code": "EFFECT_NO_COMPENSATION",
              "message": f"шаг с эффектом {s.effect} без компенсации ! — откат нечем делать"}
             for s in parse(source) if s.effect in ("money", "irreversible") and s.compensation is None]
 
