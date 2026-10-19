@@ -236,6 +236,46 @@ jobs:
           PY
           echo "========== RAW PAIRED A/B REPORT =========="
           cat bench/live_paired_ab.json
+      - name: Add paired benchmark status to job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo ""
+            echo "## Paired live PICK vs classic Python benchmark"
+            echo ""
+            if [ ! -f bench/live_paired_ab.json ]; then
+              echo "**Status: NOT RUN / NO REPORT.** The paired benchmark did not produce a report."
+            else
+              python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("bench/live_paired_ab.json").read_text(encoding="utf-8"))
+          rows = report.get("pick", []) + report.get("baseline", [])
+          errors = [str(row.get("error", "")) for row in rows if row.get("error")]
+          rate_limited = any("429" in error or "rate limit" in error.lower() or "quota exceeded" in error.lower()
+                             for error in errors)
+          planned = len(report.get("tasks", [])) * int(report.get("repeats", 1))
+          pick = report.get("pick", [])
+          baseline = report.get("baseline", [])
+          print(f"- Repeats configured: {report.get('repeats', 1)}")
+          print(f"- Task-runs planned per adapter: {planned}")
+          print(f"- PICK results recorded: {len(pick)}; passed: {sum(bool(r.get('ok')) for r in pick)}")
+          print(f"- Classic Python results recorded: {len(baseline)}; passed: {sum(bool(r.get('ok')) for r in baseline)}")
+          if rate_limited:
+              print("- **Status: INCONCLUSIVE (provider rate limit/quota error detected). Do not interpret missing or failed rows as model/code failures.**")
+              for error in errors:
+                  if "429" in error or "rate limit" in error.lower() or "quota exceeded" in error.lower():
+                      print(f"- Provider error: {error[:240]}")
+                      break
+          elif len(pick) != planned or len(baseline) != planned:
+              print("- **Status: INCOMPLETE. Recorded row counts do not match the configured trial count.**")
+          else:
+              print("- Status: report complete; interpret pass rates alongside the per-task outputs and token/time metrics.")
+          PY
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Print complete live results in logs
         if: always()
         shell: bash
