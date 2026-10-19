@@ -97,12 +97,11 @@ Temporal нужен для долгих workflow, внешних сигнало�
 
 ## Живой A/B каскадов
 
-Live evaluation uses free OpenRouter model tiers by default. If the free-model daily quota is exhausted,
-the run stops attempting further tasks after the first provider 429 to avoid wasting requests.
-For an explicitly budgeted paid-model run, configure repository variable `PICK_LIVE_MODEL_TIERS`
-as JSON arrays of model IDs ordered by fallback tier, for example
-`[["provider/cheap-model"],["provider/fallback-model"]]`. Choose models and budget deliberately;
-the default remains free-only.
+Live evaluation in GitHub Actions uses the `GROQ_TOKEN` repository secret with Groq's OpenAI-compatible API.
+The default fallback tiers are `openai/gpt-oss-20b` then `openai/gpt-oss-120b`. Groq usage depends on the
+account's rate limits and billing; the workflow stops attempting remaining tasks after the first provider 429.
+To override model tiers, configure repository variable `PICK_LIVE_MODEL_TIERS` as JSON arrays of model IDs
+ordered by fallback tier, for example `[["openai/gpt-oss-20b"],["openai/gpt-oss-120b"]]`.
 
 Sequential против hedged на 3 задачах (`docs/LIVE_HEDGE.md`): оба 3/3,
 hedged 42 с суммарно против 50 с и 5556 токенов против 6294. На шумном
@@ -282,4 +281,4 @@ Genesis (95 ток.) + исправление опечатки патчем (19 
 
 ## Выпуск релиза
 
-Проверки перед публикацией версии собраны в [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md). Live-метрики конкретного запуска смотри в GitHub Actions → job **Live OpenRouter cascade** → логи или **Job Summary**; они не требуют артефактов и не должны трактоваться как постоянные показатели.
+Проверки перед публикацией версии собраны в [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md). Live-метрики конкретного запуска смотри в GitHub Actions → job **Live Groq cascade** → логи или **Job Summary**; они не требуют артефактов и не должны трактоваться как постоянные показатели.
