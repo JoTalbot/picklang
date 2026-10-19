@@ -42,6 +42,11 @@ def compile_ir(source: str) -> dict[str, Any]:
         if s.signal: item["signal"] = s.signal
         if s.budget: item["budget"] = s.budget
         if s.branches: item["branches"] = [[tgt, _expr_ir(e)] for tgt, e in s.branches]
+        if s.kind == "loop":
+            item["loop_var"] = s.loop_var
+            b = s.body
+            item["body"] = {"kind": b.kind, "target": b.target,
+                            "expr": _expr_ir(b.expr) if b.expr is not None else None}
         if s.kind == "donewhen":
             item["conditions"] = [_expr_ir(e) for e in s.expr]
         elif s.expr is not None: item["expr"] = _expr_ir(s.expr)

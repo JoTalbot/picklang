@@ -126,3 +126,11 @@ def test_12_oneshot_counts():
     from picklang.parser import parse
     steps = sum(1 for t in TASKS for s in parse(t["src"]) if s.kind in ("assign", "expr"))
     assert steps > len(TASKS)  # шагов больше, чем задач: ReAct платит за каждый
+
+
+def test_aot_loop_parallel_parity():
+    from picklang.aot import run_compiled
+    src = "> t(xs)\nfor i in xs: y = dbl(i)\na = f(1) || b = g(2)\ndone when: y > 1\nout {y: y, a: a}\n"
+    reg = {"dbl": lambda i: i * 2, "f": lambda x: 10, "g": lambda x: 20}
+    out, _ = run_compiled(src, reg, {"xs": [1, 3]})
+    assert out == {"y": 6, "a": 10}

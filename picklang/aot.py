@@ -69,6 +69,21 @@ def generate_python(source: str) -> str:
         kind = step["kind"]
         if kind == "goal":
             continue
+        if kind == "budget":
+            continue  # бюджеты считает интерпретатор/рантайм; AOT — быстрый путь без учёта
+        if kind == "loop":
+            var = step["loop_var"]
+            lines.append(f"    for env[{var!r}] in {_gen_expr(step['expr'])}:")
+            body = step["body"]
+            lines.append(f"        env[{body['target']!r}] = {_gen_expr(body['expr'])}")
+            continue
+        if kind == "parallel":
+            for target, expr in step["branches"]:
+                if target:
+                    lines.append(f"    env[{target!r}] = {_gen_expr(expr)}")
+                else:
+                    lines.append(f"    {_gen_expr(expr)}")
+            continue  # AOT исполняет ветви последовательно: семантика та же, параллелизм — за интерпретатором
         if kind in ("assign", "expr"):
             code = _gen_expr(step["expr"])
             if step.get("target"):
@@ -94,14 +109,16 @@ def generate_python(source: str) -> str:
 
 
 @lru_cache(maxsize=64)
-def _compiled(digest: str, source: str):
+def _compiled_source(source: str):
+    """Кэш по самому тексту программы: digest считается один раз внутри,
+    а не на каждый вызов (иначе кэш съедается повторным парсингом)."""
     ns: dict[str, Any] = {"_fused_top_fields": _fused_top_fields}
     exec(generate_python(source), ns)
     return ns["_pick_program"]
 
 
 def compile_program(source: str) -> Callable:
-    return _compiled(program_digest(source), source)
+    return _compiled_source(source)
 
 
 def run_compiled(source: str, registry: dict, inputs: dict | None = None, signal_provider=None):
