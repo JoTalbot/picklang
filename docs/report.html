@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<title>PICK / durable-weave — сравнительные результаты</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:32px auto;max-width:1060px;padding:0 18px;color:#17202a;background:#fbfbfc}
+h1{font-size:28px} h2{margin-top:34px;border-bottom:2px solid #e5e7eb;padding-bottom:6px}
+.card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:18px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+table{border-collapse:collapse;width:100%;background:#fff} th,td{border:1px solid #e5e7eb;padding:8px 10px;text-align:left} th{background:#f3f4f6}
+.bar-row{display:grid;grid-template-columns:250px 1fr 90px;gap:10px;align-items:center;margin:8px 0}
+.bar{height:20px;border-radius:6px;background:#2563eb}.bar.alt{background:#f59e0b}.bar.good{background:#16a34a}
+.lab{font-weight:600}.val{font-variant-numeric:tabular-nums;text-align:right}
+.note{color:#555}.big{font-size:22px;font-weight:700}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}
+.kpi{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:16px}.kpi div{font-size:26px;font-weight:800}
+</style></head><body>
+<h1>PICK / durable-weave — сравнительные результаты тестов</h1>
+<p class="note">Все цифры воспроизводимы командами из репозитория: bench_tokens.py, bench_corpus.py, bench_live_cycle.py, bench_agent_tools.py, bench_agent_handoff.py, eval_harness.py. Токены — tiktoken cl100k_base; живой LLM-прогон — фактический usage OpenRouter.</p>
+
+<div class="grid">
+<div class="kpi">Тесты<div>48 / 48</div><span>unit + integration + MCP + Temporal-класс</span></div>
+<div class="kpi">Eval задач<div>20 / 20</div><span>на моках (нижняя планка)</span></div>
+<div class="kpi">Temporal live<div>PASS</div><span>тестовый сервер исполнил IR</span></div>
+<div class="kpi">Durable resume<div>1 вызов</div><span>банк не вызван повторно после crash</span></div>
+</div>
+
+<h2>1. Токены: синтаксис программ</h2>
+<div class="card">
+<div class="bar-row"><span class="lab">Корпус 8 задач: PICK</span><div><div class="bar good" style="width:65%"></div></div><span class="val">609</span></div>
+<div class="bar-row"><span class="lab">Корпус 8 задач: Python</span><div><div class="bar alt" style="width:100%"></div></div><span class="val">942 (1.55x)</span></div>
+<div class="bar-row"><span class="lab">Сага из examples: PICK</span><div><div class="bar good" style="width:35%"></div></div><span class="val">121</span></div>
+<div class="bar-row"><span class="lab">Сага из examples: Python</span><div><div class="bar alt" style="width:100%"></div></div><span class="val">350 (2.9x)</span></div>
+<div class="bar-row"><span class="lab">Агент+HITL: PICK</span><div><div class="bar good" style="width:48%"></div></div><span class="val">111</span></div>
+<div class="bar-row"><span class="lab">Агент+HITL: Python</span><div><div class="bar alt" style="width:100%"></div></div><span class="val">229 (2.1x)</span></div>
+<p class="note">Корпус специально писан компактным идиоматичным Python — это консервативная оценка. Полная механика из examples даёт 2.1–2.9x.</p>
+</div>
+
+<h2>2. Токены: живой цикл работы агента</h2>
+<table><tr><th>Сценарий</th><th>Классика</th><th>Наш путь</th><th>Выигрыш</th></tr>
+<tr><td>Написать + исправить ошибку (подписка)</td><td>466</td><td>114 (намерение 95 + патч 19)</td><td><b>4.1x</b></td></tr>
+<tr><td>Ответ web.search в контекст</td><td>11 962</td><td>62 после top/fields</td><td><b>193x</b></td></tr>
+<tr><td>Тот же ответ через ToolResultGuard</td><td>11 962</td><td>18 (+ полный в CAS по ref)</td><td><b>664x</b></td></tr>
+<tr><td>Передача контекста другому агенту</td><td>1 532</td><td>170 handoff</td><td><b>9x</b></td></tr>
+<tr><td>Повторная та же подзадача</td><td>2 вызова (LLM+поиск)</td><td>0 вызовов, кэш</td><td><b>∞</b></td></tr>
+</table>
+
+<h2>3. Качество и надёжность</h2>
+<table><tr><th>Проверка</th><th>Результат</th><th>Что доказывает</th></tr>
+<tr><td>Все тесты</td><td><b>48/48</b></td><td>язык, саги, replay, CAS-tamper, словарь, MCP, taint, бюджеты</td></tr>
+<tr><td>Eval 20 задач</td><td><b>20/20</b></td><td>программы доходят до ожидаемого результата на моках</td></tr>
+<tr><td>Crash -> resume</td><td><b>COMPLETED, банк x1</b></td><td>закоммиченные шаги не повторяются</td></tr>
+<tr><td>Verify исполнения</td><td><b>True</b></td><td>хэш-цепочка и CAS-артефакты целы</td></tr>
+<tr><td>Живой LLM: намерение</td><td><b>успех с 1 раза</b></td><td>ограниченная грамматика не дала выдумать функции</td></tr>
+<tr><td>Живой LLM: Python целиком</td><td><b>невалиден</b></td><td>markdown + выдуманные pay()/notify() у слабой модели</td></tr>
+<tr><td>Живой Temporal</td><td><b>PASS (tx-live)</b></td><td>IR исполняется настоящим сервером Temporal</td></tr>
+</table>
+
+<h2>4. Скорость исполнения (новый замер)</h2>
+<div class="card">
+<p>Прямой вызов функции: ~0.1 мкс. Тот же вызов через PICK-интерпретатор: <b>69.5 мкс</b> на программу из одного шага — почти всё время уходит на <b>повторный парсинг исходника при каждом запуске</b>.</p>
+<p>Параллельные ветви: 2 ветви по 200 мс — последовательно 0.40 с, через <b>||</b> — 0.20 с (<b>2.0x</b>).</p>
+<p class="note">Для агентных задач, где шаг — это сетевой вызов на 100–2000 мс, 70 мкс интерпретатора незаметны. Но для тысяч мелких шагов и для eval-прогонов компиляция программы один раз даст порядок скорости почти даром.</p>
+</div>
+
+<h2>5. Как ещё ускорить и улучшить (по ожидаемой отдаче)</h2>
+<table><tr><th>#</th><th>Улучшение</th><th>Что даёт</th><th>Усилие</th></tr>
+<tr><td>1</td><td><b>Кэш скомпилированного IR</b>: parse один раз по digest, дальше — готовый план шагов; кэшировать кодировку токенизатора</td><td>Интерпретатор: ожидаемо 5–10x на мелких шагах; estimate_tokens перестанет пересоздавать encoding на каждый вызов</td><td>Низкое</td></tr>
+<tr><td>2</td><td><b>Constrained decoding по умолчанию</b> в живом цикле (json_schema уже экспортируется)</td><td>Убирает целые круги «невалидный JSON -> перепиши»: это секунды и тысячи reasoning-токенов, а не payload</td><td>Низкое</td></tr>
+<tr><td>3</td><td><b>Лимит reasoning-бюджета</b> модели в роутере</td><td>В живом прогоне 2216 из 2376 completion — скрытое рассуждение. Кап на простые намерения: кратно дешевле и быстрее</td><td>Низкое</td></tr>
+<tr><td>4</td><td><b>Проекции внутрь инструментов</b> (pushdown): top/fields уезжают аргументами в MCP-вызов</td><td>Полный результат вообще не гоняется по сети и не сериализуется; сейчас режем после получения</td><td>Среднее</td></tr>
+<tr><td>5</td><td><b>Параллельный frontier в durable-исполнителе</b>: независимые активности одновременно, а не только ветви интерпретатора</td><td>2x+ на ветвящихся процессах при сохранении digest (порядок коммитов канонизируется)</td><td>Среднее</td></tr>
+<tr><td>6</td><td><b>Пул MCP-соединений</b> вместо процесса на вызов + батч вызовов инструментов</td><td>Убирает spawn-процесс на каждый tool call (десятки мс каждый)</td><td>Среднее</td></tr>
+<tr><td>7</td><td><b>Семантический кэш для llm.* по умолчанию</b> + векторное сходство вместо Жаккара</td><td>Повторные подзадачи «другими словами» без вызова модели; главный риск — ложные попадания, нужен страж-валидатор</td><td>Среднее</td></tr>
+<tr><td>8</td><td><b>Батч-коммит журнала</b>: несколько событий одной транзакцией SQLite, ленивый verify</td><td>Меньше fsync на шаг при тысячах шагов; verify — выборочно по digest</td><td>Низкое</td></tr>
+<tr><td>9</td><td><b>Стриминговый статус агенту</b>: строка статуса после каждого шага, а не отчёт в конце</td><td>Модель раньше видит ошибку и не тратит шаги в неверную сторону</td><td>Низкое</td></tr>
+<tr><td>10</td><td><b>Живой eval по моделям</b>: 20 задач x несколько моделей, метрики — успех/цена/круги исправлений</td><td>Перестаём оптимизировать вслепую: видно, какая модель и какой приём реально работают</td><td>Среднее</td></tr>
+</table>
+<p class="note">Приоритет: 1–3 делаются за один заход и бьют по измеренным потерям (парсинг каждый раз, круги исправлений, reasoning-налог). Дальше — 5 и 10: параллелизм в durable-слое и честная метрика успешности по моделям.</p>
+</body></html>
