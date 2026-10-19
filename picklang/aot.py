@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from threading import RLock
 from typing import Any, Callable
 
 from .ir import compile_ir, program_digest
@@ -26,6 +27,7 @@ def _fused_top_fields(items, n, *names):
     return out
 
 
+_COMPILE_LOCK = RLock()  # генератор использует временное глобальное состояние
 _FN_INDEX: dict[str, int] = {}
 _VAR_LOCALS: dict[str, str] | None = None  # имя переменной -> локальное имя в сгенерированном коде
 
@@ -133,9 +135,13 @@ def _collect_vars(steps) -> list[str]:
     return names
 
 
-def generate_python(source: str) -> str:
+def _generate_python_unlocked(source: str) -> str:
     global _VAR_LOCALS
     ir = compile_ir(source)
+    unsupported = sorted({step["kind"] for step in ir["steps"] if step["kind"] in ("budget", "parallel")})
+    if unsupported:
+        kinds = ", ".join(unsupported)
+        raise ValueError(f"AOT does not support {kinds}; use the interpreter via run_program()")
     var_names = _collect_vars(ir["steps"])
     _VAR_LOCALS = {name: f"_v{i}" for i, name in enumerate(var_names)}
 
@@ -221,16 +227,26 @@ def generate_python(source: str) -> str:
     return "\n".join(header + lines) + "\n"
 
 
+def generate_python(source: str) -> str:
+    """Generate code atomically; never leak compiler globals between threads."""
+    global _VAR_LOCALS
+    with _COMPILE_LOCK:
+        try:
+            return _generate_python_unlocked(source)
+        finally:
+            _VAR_LOCALS = None
+
+
 @lru_cache(maxsize=64)
 def _compiled_source(source: str):
-    """Кэш по самому тексту программы: digest считается один раз внутри,
-    а не на каждый вызов (иначе кэш съедается повторным парсингом)."""
-    ns: dict[str, Any] = {"_fused_top_fields": _fused_top_fields, "DoneWhenFailed": DoneWhenFailed}
-    _FN_INDEX.clear()
-    code = generate_python(source)
-    ns["_FN_NAMES"] = [name for name, _ in sorted(_FN_INDEX.items(), key=lambda kv: kv[1])]
-    exec(code, ns)
-    return ns["_pick_program"]
+    """Кэш по тексту; сборка кода и индекса функций атомарны между потоками."""
+    with _COMPILE_LOCK:
+        ns: dict[str, Any] = {"_fused_top_fields": _fused_top_fields, "DoneWhenFailed": DoneWhenFailed}
+        _FN_INDEX.clear()
+        code = generate_python(source)
+        ns["_FN_NAMES"] = [name for name, _ in sorted(_FN_INDEX.items(), key=lambda kv: kv[1])]
+        exec(code, ns)
+        return ns["_pick_program"]
 
 
 def compile_program(source: str) -> Callable:

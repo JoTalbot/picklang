@@ -111,16 +111,45 @@ class SQLiteEventLog:
         return True, f"sampled ok ({len(idx)}/{len(self.events)})"
 
     def verify_chain(self) -> tuple[bool, str]:
-        prev = GENESIS
-        for i, ev in enumerate(self.events):
-            body = {k: v for k, v in ev.items() if k != "hash"}
-            if i == 0 and ev["type"] == "StateSnapshot":
-                # якорь после компакции: его собственный хэш — старт цепочки
-                if event_hash(ev.get("prev", GENESIS), body) != ev.get("hash"):
-                    return False, "event 0: якорный снимок повреждён"
+        # Проверяем архив целиком, а не только активное окно после compaction.
+        # Повторный compact может записать якорь в archive ещё раз, поэтому
+        # одинаковые дубликаты по seq допустимы, а конфликтующие — нет.
+        has_archive = self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='archive'"
+        ).fetchone() is not None
+        archived: list[dict[str, Any]] = []
+        if has_archive:
+            by_seq: dict[int, dict[str, Any]] = {}
+            rows = self.db.execute(
+                "SELECT seq,type,data,prev,hash FROM archive ORDER BY seq"
+            )
+            for seq, typ, data, prev_hash, h in rows:
+                ev = {"seq": seq, "type": typ, "data": json.loads(data), "prev": prev_hash, "hash": h}
+                prior = by_seq.get(seq)
+                if prior is not None and prior != ev:
+                    return False, f"archive seq {seq}: conflicting duplicate"
+                by_seq[seq] = ev
+            archived = [by_seq[seq] for seq in sorted(by_seq)]
+            prev = GENESIS
+            for i, ev in enumerate(archived):
+                body = {k: v for k, v in ev.items() if k != "hash"}
+                if ev.get("prev") != prev or event_hash(prev, body) != ev.get("hash"):
+                    return False, f"archive event {i}: chain corrupted"
                 prev = ev["hash"]
-                continue
+
+        start = 0
+        prev = GENESIS
+        if archived and self.events:
+            anchor = archived[-1]
+            current = self.events[0]
+            if current.get("seq") != anchor.get("seq") or current.get("hash") != anchor.get("hash"):
+                return False, "active journal does not match archived anchor"
+            prev = anchor["hash"]
+            start = 1
+        for i in range(start, len(self.events)):
+            ev = self.events[i]
+            body = {k: v for k, v in ev.items() if k != "hash"}
             if ev.get("prev") != prev or event_hash(prev, body) != ev.get("hash"):
-                return False, f"event {i}: цепочка нарушена"
+                return False, f"event {i}: chain corrupted"
             prev = ev["hash"]
         return True, "ok"

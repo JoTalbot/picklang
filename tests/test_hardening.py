@@ -70,3 +70,32 @@ def test_aot_is_disabled_for_parallel_steps():
 
     source = '> t(x)\na = f(x) || b = g(x)\nout {a: a, b: b}\n'
     assert _aot_eligible(source, None, None, ()) is False
+
+
+def test_aot_fails_closed_for_budget_and_parallel_semantics():
+    from picklang.aot import generate_python
+
+    with pytest.raises(ValueError, match="budget"):
+        generate_python('> t(x)\\n!budget steps<1\\ny = f(x)\\nout y\\n')
+    with pytest.raises(ValueError, match="parallel"):
+        generate_python('> t(x)\\na = f(x) || b = g(x)\\nout {a: a, b: b}\\n')
+
+
+def test_aot_compilation_state_is_thread_safe():
+    from concurrent.futures import ThreadPoolExecutor
+    from picklang.aot import run_compiled
+
+    cases = [
+        ('> t(x)\\ny = f(x)\\nout y\\n', {"f": lambda x: x + 1}, {"x": i}, i + 1)
+        for i in range(20)
+    ]
+    cases += [
+        ('> t(x)\\ny = g(x)\\nout y\\n', {"g": lambda x: x * 2}, {"x": i}, i * 2)
+        for i in range(20)
+    ]
+    def run(case):
+        source, registry, inputs, expected = case
+        output, _env = run_compiled(source, registry, inputs)
+        return output == expected
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        assert all(pool.map(run, cases))
