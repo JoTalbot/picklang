@@ -157,6 +157,9 @@ jobs:
         continue-on-error: true
         timeout-minutes: 22
         run: |
+          # The preceding live cascade can consume nearly a full provider TPM window.
+          # Let the provider's rolling rate-limit window reset before the paired run.
+          sleep 65
           python bench_pair.py \
             --tasks bench/live_paired_tasks.json \
             --pick-command "env PICK_AB_MODE=pick python bench_live_adapters.py" \
