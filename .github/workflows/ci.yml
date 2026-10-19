@@ -116,3 +116,35 @@ jobs:
           else
             echo "No live result file was produced."
           fi
+      - name: Add live results to job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Live OpenRouter cascade"
+            if [ -f bench/live_cascade_results.json ]; then
+              python - <<'PY'
+          import json
+          from pathlib import Path
+
+          rows = json.loads(Path("bench/live_cascade_results.json").read_text(encoding="utf-8"))
+          print("| Task | Result | Tier | Model | Attempts | Seconds |")
+          print("|---|---|---:|---|---:|---:|")
+          for row in rows:
+              print(f"| {row.get('task')} | {'PASS' if row.get('ok') else 'FAIL'} | {row.get('tier')} | {row.get('model')} | {row.get('attempts')} | {row.get('seconds')} |")
+          print(f"\n**Total: {sum(bool(row.get('ok')) for row in rows)}/{len(rows)} tasks passed.**")
+          PY
+            else
+              echo "No live result file was produced."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve live results as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-openrouter-results-${{ github.run_id }}
+          path: |
+            bench/live_cascade_results.json
+            docs/LIVE_CASCADE.md
+          if-no-files-found: warn
+          retention-days: 14
