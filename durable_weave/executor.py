@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from .cas import ContentAddressedStore
+from .cas import ContentAddressedStore, canonical_json, sha256_hex
 from .sqlite_backend import SQLiteEventLog
 
 
@@ -41,6 +41,11 @@ class ExecutionResult:
 
 
 Handler = Callable[[dict[str, Any]], Any]
+
+
+def _input_digest(payload: dict) -> str:
+    """Хэш входа прямо в событии: отдельный CAS-объект ради digest больше не пишется."""
+    return sha256_hex(canonical_json(payload))
 
 
 class Context:
@@ -113,7 +118,7 @@ class Context:
                 ref = ex.cas.put_json({"activity": name, "step": step_id, "result": result})
                 batch.append(("ActivityCompleted", {"step": step_id, "activity": name,
                                                     "idempotency_key": key,
-                                                    "input_digest": ex.cas.put_json(payload),
+                                                    "input_digest": _input_digest(payload),
                                                     "result_ref": ref}))
                 ex._completed[step_id] = ref
                 results[i] = result
@@ -156,7 +161,7 @@ class DurableExecutor:
         assert self.log is not None
         self.log.append("ActivityCompleted", {
             "step": step_id, "activity": name, "idempotency_key": idempotency_key,
-            "input_digest": self.cas.put_json(payload), "result_ref": result_ref,
+            "input_digest": _input_digest(payload), "result_ref": result_ref,
         })
         self._completed[step_id] = result_ref
         self._steps_done += 1

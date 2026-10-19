@@ -27,6 +27,7 @@ def _fused_top_fields(items, n, *names):
 
 
 _FN_INDEX: dict[str, int] = {}
+_VAR_LOCALS: dict[str, str] | None = None  # имя переменной -> локальное имя в сгенерированном коде
 
 
 def _fn_ref(name: str) -> str:
@@ -40,10 +41,15 @@ def _gen_expr(expr, env="env", reg="registry") -> str:
     if "lit" in expr:
         return repr(expr["lit"])
     if "var" in expr:
+        if _VAR_LOCALS is not None:
+            return _VAR_LOCALS.get(expr["var"], f"{env}[{expr['var']!r}]")
         return f"{env}[{expr['var']!r}]"
     if "get" in expr:
         parts = expr["get"].split(".")
-        code = f"{env}[{parts[0]!r}]"
+        if _VAR_LOCALS is not None and parts[0] in _VAR_LOCALS:
+            code = _VAR_LOCALS[parts[0]]
+        else:
+            code = f"{env}[{parts[0]!r}]"
         for part in parts[1:]:
             code = f"{code}[{part!r}]"
         return code
@@ -83,8 +89,59 @@ def _uses_var(expr, var) -> bool:
     return False
 
 
+def _collect_vars(steps) -> list[str]:
+    names: list[str] = []
+
+    def add(name):
+        if name and name not in names:
+            names.append(name)
+
+    def walk(expr):
+        if isinstance(expr, dict):
+            if "var" in expr:
+                add(expr["var"])
+            if "get" in expr:
+                add(expr["get"].split(".")[0])
+            for v in expr.values():
+                walk(v)
+        elif isinstance(expr, list):
+            for v in expr:
+                walk(v)
+
+    for s in steps:
+        for prm in s.get("params") or []:
+            add(prm)
+        if s.get("target"):
+            add(s["target"])
+        if s.get("loop_var"):
+            add(s["loop_var"])
+        if s.get("body") and s["body"].get("target"):
+            add(s["body"]["target"])
+        for tgt, _e in s.get("branches") or []:
+            add(tgt)
+        if s.get("signal"):
+            add(s["signal"])
+        for key in ("expr", "conditions"):
+            if s.get(key):
+                walk(s[key])
+        if s.get("body") and s["body"].get("expr"):
+            walk(s["body"]["expr"])
+        for _tgt, e in s.get("branches") or []:
+            walk(e)
+        if s.get("compensation"):
+            walk(s["compensation"])
+    return names
+
+
 def generate_python(source: str) -> str:
+    global _VAR_LOCALS
     ir = compile_ir(source)
+    var_names = _collect_vars(ir["steps"])
+    _VAR_LOCALS = {name: f"_v{i}" for i, name in enumerate(var_names)}
+
+    def loc(name: str) -> str:
+        return _VAR_LOCALS[name]  # type: ignore[index]
+
     body_lines = ["    out = None",
                   "    _compensations = []"]
     lines = body_lines
@@ -107,25 +164,25 @@ def generate_python(source: str) -> str:
                 lines.append(f"    _items = {iterable}")
                 lines.append(f"    _batch = registry.get({bexpr['call'] + '.batch'!r})")
                 lines.append("    if _batch is not None:")
-                lines.append(f"        env[{body['target']!r}] = _batch(_items{suffix})")
+                lines.append(f"        {loc(body['target'])} = _batch(_items{suffix})")
                 lines.append("    else:")
-                lines.append(f"        for env[{var!r}] in _items:")
-                lines.append(f"            env[{body['target']!r}] = {_gen_expr(bexpr)}")
+                lines.append(f"        for {loc(var)} in _items:")
+                lines.append(f"            {loc(body['target'])} = {_gen_expr(bexpr)}")
             else:
-                lines.append(f"    for env[{var!r}] in {iterable}:")
-                lines.append(f"        env[{body['target']!r}] = {_gen_expr(bexpr)}")
+                lines.append(f"    for {loc(var)} in {iterable}:")
+                lines.append(f"        {loc(body['target'])} = {_gen_expr(bexpr)}")
             continue
         if kind == "parallel":
             for target, expr in step["branches"]:
                 if target:
-                    lines.append(f"    env[{target!r}] = {_gen_expr(expr)}")
+                    lines.append(f"    {loc(target)} = {_gen_expr(expr)}")
                 else:
                     lines.append(f"    {_gen_expr(expr)}")
             continue  # AOT исполняет ветви последовательно: семантика та же, параллелизм — за интерпретатором
         if kind in ("assign", "expr"):
             code = _gen_expr(step["expr"])
             if step.get("target"):
-                lines.append(f"    env[{step['target']!r}] = {code}")
+                lines.append(f"    {loc(step['target'])} = {code}")
             else:
                 lines.append(f"    {code}")
             if "compensation" in step:
@@ -136,16 +193,20 @@ def generate_python(source: str) -> str:
         elif kind == "wait":
             lines.append(f"    _v = signal_provider({step['signal']!r}) if signal_provider else None")
             lines.append("    if _v is None: raise WaitingSignal(%r)" % step["signal"])
-            lines.append(f"    env[{step['signal']!r}] = _v")
+            lines.append(f"    {loc(step['signal'])} = _v")
         elif kind == "donewhen":
             for cond in step["conditions"]:
                 lines.append(f"    if not ({_gen_expr(cond)}): raise DoneWhenFailed('done when не выполнен')")
         elif kind == "out":
             lines.append(f"    out = {_gen_expr(step['expr'])}")
+    for name in var_names:
+        lines.append(f"    env[{name!r}] = {loc(name)}")
     lines.append("    return out")
     header = ["def _pick_program(env, registry, signal_provider=None):",
               "    from picklang.interpreter import WaitingSignal",
               "    _fn = [registry.get(_n) for _n in _FN_NAMES]"]
+    header += [f"    {loc(n)} = env.get({n!r})" for n in var_names]
+    _VAR_LOCALS = None
     if any("compensation" in s for s in ir["steps"]):
         # сага: при бизнес-ошибке компенсации в обратном порядке, затем проброс
         wrapped = header + ["    try:"]

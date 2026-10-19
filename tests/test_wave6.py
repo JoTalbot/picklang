@@ -215,3 +215,39 @@ def test_chat_total_deadline_against_dripping_server():
     finally:
         live_agent.API = old
         srv.shutdown()
+
+
+def test_hedged_cascade_beats_sequential(monkeypatch):
+    import time as _t
+    import picklang.cascade as casc
+
+    def fake_chat(key, model, messages, timeout=None, json_schema=None, **kw):
+        if model == "cheap":
+            _t.sleep(0.5)
+            return "мусор", {}
+        _t.sleep(0.1)
+        return '{"goal": "x"}', {}
+    monkeypatch.setattr(casc, "chat", fake_chat)
+    hedge = casc.HedgedCascade([["cheap"], ["strong"]], per_model_timeout=10)
+    t0 = _t.monotonic()
+    res = hedge.run_hedged("k", [], validator=lambda t: t.startswith("{"), hedge_delay=0.15)
+    elapsed = _t.monotonic() - t0
+    # последовательно было бы 0.5 (провал дешёвой) + 0.1 = 0.6+; hedged: 0.15 + 0.1
+    assert res["model"] == "strong" and elapsed < 0.45
+
+
+def test_batch_generate_one_call_and_fallback(monkeypatch):
+    import picklang.batch_gen as bg
+    calls = {"n": 0}
+    def fake_chat(key, model, messages, timeout=None, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return '{"programs": ["> t(x)\\nout 1\\n", "мусор"]}', {"total_tokens": 50}
+        return "> t(x)\nout 2\n", {"total_tokens": 20}
+    monkeypatch.setattr(bg, "chat", fake_chat)
+    from picklang.batch_gen import batch_generate
+    vals = [lambda t: "out 1" in t, lambda t: "out 2" in t]
+    res = batch_generate("k", "m", ["задача1", "задача2"], vals)
+    assert res[0]["ok"] and res[0]["source"] == "batch"
+    assert res[1]["ok"] and res[1]["source"] == "single"  # мусор из пакета догенерирован
+    assert calls["n"] == 2  # 1 пакетный + 1 одиночный вместо 2 одиночных
