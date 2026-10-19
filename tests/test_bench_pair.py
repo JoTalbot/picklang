@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from bench_pair import load_tasks, run_pair
+from bench_pair import load_tasks, run_one, run_pair
 
 
 def adapter(code):
@@ -29,18 +29,32 @@ def test_same_inputs_are_sent_to_both_adapters_and_order_alternates(tmp_path):
 
 
 def test_timeout_is_a_failed_row():
-    tasks = [{"task": "slow", "input": {}}]
-    report = run_pair(tasks, adapter("import time; time.sleep(1)"),
-                      adapter("print('{\"ok\": true}')"), timeout=0.05)
-    assert report["pick"][0]["ok"] is False
-    assert "timed out" in report["pick"][0]["error"]
+    task = {"task": "slow", "input": {}}
+    row = run_one(adapter("import time; time.sleep(1)"), task, timeout=0.05)
+    assert row["ok"] is False
+    assert "timed out" in row["error"]
+
+
+def test_baseline_succeeds_when_given_a_realistic_timeout():
+    tasks = [{"task": "fast", "input": {}}]
+    valid_json = "import json; print(json.dumps({'ok': True}))"
+    report = run_pair(
+        tasks,
+        adapter(valid_json),
+        adapter(valid_json),
+        timeout=5,
+    )
+    assert report["pick"][0]["ok"] is True
     assert report["baseline"][0]["ok"] is True
 
 
 def test_invalid_adapter_output_is_failed_not_crash():
     tasks = [{"task": "bad", "input": {}}]
-    report = run_pair(tasks, adapter("print('not json')"),
-                      adapter("print('{\"ok\": true}')"))
+    report = run_pair(
+        tasks,
+        adapter("print('not json')"),
+        adapter("import json; print(json.dumps({'ok': True}))"),
+    )
     assert report["pick"][0]["ok"] is False
     assert "not one JSON object" in report["pick"][0]["error"]
 
