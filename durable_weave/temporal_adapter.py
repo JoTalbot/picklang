@@ -153,13 +153,22 @@ try:  # pragma: no cover - зависит от окружения
                                 raise _AppErr("done when не выполнен", non_retryable=True)
                     elif kind == "out":
                         return await self._eval(step["expr"], env)
-            except Exception:
-                # сага: компенсации activities в обратном порядке
+            except Exception as original_error:
+                # Сага: компенсации activities в обратном порядке. Не теряем
+                # исходную ошибку и добавляем диагностику неудачных компенсаций.
+                compensation_errors = []
                 for comp in reversed(compensations):
                     try:
                         await self._eval(comp, env)
-                    except Exception:
-                        pass
+                    except Exception as compensation_error:
+                        compensation_errors.append(compensation_error)
+                if compensation_errors:
+                    details = "; ".join(
+                        f"{type(error).__name__}: {error}" for error in compensation_errors
+                    )
+                    original_error.add_note(
+                        f"Не удалось выполнить {len(compensation_errors)} компенсаций: {details}"
+                    )
                 raise
 
         async def _eval(self, expr, env):
