@@ -3,7 +3,7 @@
 
 Использует temporalio test server (скачивается SDK при первом запуске).
 Честные исходы: PASS (workflow дошёл до результата на настоящем сервере),
-SKIP (нет temporalio / нет сети / сервер не поднялся) — SKIP не равен PASS.
+SKIP только при отсутствии temporalio; ошибки запуска сервера и workflow дают FAIL.
 Запуск: python3 tools/temporal_smoke.py
 """
 import asyncio
@@ -35,8 +35,8 @@ async def amain() -> int:
         print(f"PASS: настоящий Temporal-сервер исполнил IR, результат: {result}")
         return 0
     except Exception as e:
-        print(f"SKIP: тестовый сервер недоступен: {type(e).__name__}: {str(e)[:200]}")
-        return 0
+        print(f"FAIL: тестовый сервер или workflow завершился ошибкой: {type(e).__name__}: {str(e)[:500]}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
