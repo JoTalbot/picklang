@@ -95,26 +95,52 @@ jobs:
           fi
       - name: Run live cascade
         run: python eval_live_cascade.py --timeout 45 --write
-      - name: Print concise results
+      - name: Print complete live results in logs
         if: always()
         shell: bash
         run: |
+          echo "========== LIVE OPENROUTER CASCADE =========="
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Commit: $GITHUB_SHA"
+          echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           if [ -f bench/live_cascade_results.json ]; then
             python - <<'PY'
           import json
           from pathlib import Path
 
           rows = json.loads(Path("bench/live_cascade_results.json").read_text(encoding="utf-8"))
+          print("\nTASK DETAILS")
+          print("| Task | Result | Tier | Model | Attempts | Seconds | Prompt tokens | Completion tokens |")
+          print("|---|---|---:|---|---:|---:|---:|---:|")
           for row in rows:
               print(
-                  f"{row.get('task')}: {'PASS' if row.get('ok') else 'FAIL'} "
-                  f"tier={row.get('tier')} model={row.get('model')} "
-                  f"attempts={row.get('attempts')} seconds={row.get('seconds')}"
+                  f"| {row.get('task')} | {'PASS' if row.get('ok') else 'FAIL'} "
+                  f"| {row.get('tier')} | {row.get('model')} | {row.get('attempts')} "
+                  f"| {row.get('seconds')} | {row.get('prompt_tokens', 0)} "
+                  f"| {row.get('completion_tokens', 0)} |"
               )
-          print(f"TOTAL: {sum(bool(row.get('ok')) for row in rows)}/{len(rows)}")
+              if row.get("error"):
+                  print(f"ERROR [{row.get('task')}]: {row['error']}")
+          total = len(rows)
+          passed = sum(bool(row.get("ok")) for row in rows)
+          tier0 = sum(bool(row.get("ok")) and row.get("tier") == 0 for row in rows)
+          attempts = sum(row.get("attempts", 0) or 0 for row in rows)
+          prompt_tokens = sum(row.get("prompt_tokens", 0) or 0 for row in rows)
+          completion_tokens = sum(row.get("completion_tokens", 0) or 0 for row in rows)
+          elapsed = round(sum(row.get("seconds", 0) or 0 for row in rows), 1)
+          print("\nFINAL SUMMARY")
+          print(f"Tasks passed: {passed}/{total}")
+          print(f"Tier-0 successes: {tier0}/{total}")
+          print(f"Attempts: {attempts}")
+          print(f"Prompt tokens: {prompt_tokens}")
+          print(f"Completion tokens: {completion_tokens}")
+          print(f"Total tokens: {prompt_tokens + completion_tokens}")
+          print(f"Sum of task durations: {elapsed}s")
+          print("=============================================")
           PY
           else
-            echo "No live result file was produced."
+            echo "ERROR: live result file was not produced."
+            echo "Check the preceding 'Run live cascade' step for the failure reason."
           fi
       - name: Add live results to job summary
         if: always()
@@ -122,30 +148,31 @@ jobs:
         run: |
           {
             echo "## Live OpenRouter cascade"
+            echo ""
+            echo "- Repository: $GITHUB_REPOSITORY"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             if [ -f bench/live_cascade_results.json ]; then
               python - <<'PY'
           import json
           from pathlib import Path
 
           rows = json.loads(Path("bench/live_cascade_results.json").read_text(encoding="utf-8"))
-          print("| Task | Result | Tier | Model | Attempts | Seconds |")
-          print("|---|---|---:|---|---:|---:|")
+          print("| Task | Result | Tier | Model | Attempts | Seconds | Prompt tokens | Completion tokens |")
+          print("|---|---|---:|---|---:|---:|---:|---:|")
           for row in rows:
-              print(f"| {row.get('task')} | {'PASS' if row.get('ok') else 'FAIL'} | {row.get('tier')} | {row.get('model')} | {row.get('attempts')} | {row.get('seconds')} |")
-          print(f"\n**Total: {sum(bool(row.get('ok')) for row in rows)}/{len(rows)} tasks passed.**")
+              print(f"| {row.get('task')} | {'PASS' if row.get('ok') else 'FAIL'} | {row.get('tier')} | {row.get('model')} | {row.get('attempts')} | {row.get('seconds')} | {row.get('prompt_tokens', 0)} | {row.get('completion_tokens', 0)} |")
+              if row.get("error"):
+                  print(f"Error for {row.get('task')}: {row['error']}")
+          passed = sum(bool(row.get("ok")) for row in rows)
+          tier0 = sum(bool(row.get("ok")) and row.get("tier") == 0 for row in rows)
+          attempts = sum(row.get("attempts", 0) or 0 for row in rows)
+          prompt_tokens = sum(row.get("prompt_tokens", 0) or 0 for row in rows)
+          completion_tokens = sum(row.get("completion_tokens", 0) or 0 for row in rows)
+          elapsed = round(sum(row.get("seconds", 0) or 0 for row in rows), 1)
+          print(f"\n**Total: {passed}/{len(rows)} tasks passed; tier-0: {tier0}; attempts: {attempts}; tokens: {prompt_tokens + completion_tokens} ({prompt_tokens} prompt + {completion_tokens} completion); summed task duration: {elapsed}s.**")
           PY
             else
-              echo "No live result file was produced."
+              echo "Live result file was not produced. See the live cascade step logs for the failure."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Preserve live results as workflow artifact
-        if: always()
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: live-openrouter-results-${{ github.run_id }}
-          path: |
-            bench/live_cascade_results.json
-            docs/LIVE_CASCADE.md
-          if-no-files-found: warn
-          retention-days: 14
