@@ -59,6 +59,9 @@ def generate(intent: dict[str, Any], registry: dict | None = None) -> str:
         if "guard" in step:
             lines.append(f"? {step['guard']} -> fail \"{step.get('fail', 'условие не выполнено')}\"")
             continue
+        if "use" in step:
+            lines.append(f"&{step['use']}({', '.join(_fmt_arg(a) for a in step.get('args', []))})")
+            continue
         if "pipe" in step:
             expr = " >> ".join(step["pipe"])
         elif "do" in step:
@@ -82,7 +85,10 @@ def generate(intent: dict[str, Any], registry: dict | None = None) -> str:
     elif isinstance(out, str):
         lines.append(f"out {out}")
     source = "\n".join(lines) + "\n"
-    diags = [d for d in check_source(source, registry) if d["code"] in ("UNDEFINED_VAR", "UNKNOWN_FN", "ARITY")]
+    # Шаги {"use": ...} разворачивает словарь проекта позже: до развёртки
+    # программу нельзя ни распарсить, ни проверить (переменные блоков не видны).
+    has_vocab_steps = any("use" in s for s in intent.get("steps", []))
+    diags = [] if has_vocab_steps else [d for d in check_source(source, registry) if d["code"] in ("UNDEFINED_VAR", "UNKNOWN_FN", "ARITY")]
     if diags:
         raise GenesisError(f"сгенерированная программа не прошла контроль: {diags}")
     return source

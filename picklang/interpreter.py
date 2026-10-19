@@ -17,6 +17,10 @@ class PickRuntimeError(Exception):
     pass
 
 
+class AbortExecution(Exception):
+    """Прерывание без компенсаций: «процесс умер», а не «программа ошиблась»."""
+
+
 class WaitingSignal(Exception):
     def __init__(self, signal: str):
         super().__init__(signal)
@@ -100,9 +104,9 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
                 env[step.signal] = value
             elif step.kind == "out":
                 output = _eval(step.expr, env, registry, activity_hook, trace)
-    except (PickRuntimeError, WaitingSignal):
-        # Сага: компенсации в обратном порядке; WaitingSignal компенсаций НЕ запускает —
-        # процесс не упал, а встал на паузу.
+    except (PickRuntimeError, WaitingSignal, AbortExecution):
+        # Сага: компенсации в обратном порядке; пауза и «смерть процесса»
+        # компенсаций НЕ запускают — процесс не упал по смыслу, а прервался.
         raise
     except Exception as exc:
         comp_trace = []

@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from picklang.interpreter import WaitingSignal, run_program
+from picklang.interpreter import AbortExecution, WaitingSignal, run_program
 
 from .executor import DurableExecutor
 
@@ -31,7 +31,12 @@ def run_pick(source: str, registry, inputs, workdir, execution_id: str,
 
     def workflow(ctx, inp):
         def hook(name, fn, args):
-            return ctx.execute_activity(name, {"args": args}, idempotency_key=name)
+            try:
+                return ctx.execute_activity(name, {"args": args}, idempotency_key=name)
+            except Exception as exc:
+                if exc.__class__.__name__ == "SimulatedCrash":
+                    raise AbortExecution(str(exc)) from exc
+                raise
         try:
             output, _env, _trace = run_program(
                 source, registry, inp,
@@ -40,6 +45,9 @@ def run_pick(source: str, registry, inputs, workdir, execution_id: str,
             )
         except WaitingSignal as wait:
             return ctx.wait_signal(wait.signal)  # -> WorkflowWaiting внутри executor.run
+        except AbortExecution as abort:
+            from .executor import SimulatedCrash
+            raise SimulatedCrash(str(abort)) from abort
         return output
 
     return executor.run(execution_id, workflow, inputs), executor
