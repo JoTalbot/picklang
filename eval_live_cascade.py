@@ -52,9 +52,10 @@ TASKS = [
     {"name": "count_results", "task": "Найди через web.search(q) -> список. Верни количество результатов через пайплайн count().",
      "tools": ["web.search"], "registry": {"web.search": lambda q: [1, 2]},
      "inputs": {"q": "x"}, "expected": 2},
-    {"name": "guard_charge", "task": "Спиши bank.charge(u, 5) -> {ok, tx}. Если p.ok ложно — упасть: ? p.ok -> fail нельзя писать наоборот: страж срабатывает когда условие ИСТИННО, поэтому проверяй отрицание нельзя; используй условие вида ? p.ok -> fail только если нужно упасть при успехе. Здесь: верни p.tx если ok, иначе программа должна упасть через страж на поле ok (подсказка: проверь, что ok истинно, стражем на обратное условие невозможно — просто верни p.tx).",
-     "tools": ["bank.charge"], "registry": {"bank.charge": lambda u, a: {"ok": True, "tx": "t9"}},
-     "inputs": {"u": "x"}, "expected": "t9"},
+    {"name": "multi_step_subscribe", "task": "Создай подписку через db.create_sub(u) -> {id}, затем отправь уведомление mail.send(u, sub.id) -> {id}. Верни объект с id подписки в поле sub и id уведомления в поле message.",
+     "tools": ["db.create_sub", "mail.send"],
+     "registry": {"db.create_sub": lambda u: {"id": "s1"}, "mail.send": lambda u, sub_id: {"id": "m1"}},
+     "inputs": {"u": "x"}, "expected": {"sub": "s1", "message": "m1"}},
 ]
 
 
