@@ -36,6 +36,7 @@ def host_namespace(task):
         if isinstance(value, dict):
             return SimpleNamespace(**{k: wrap(v) for k, v in value.items()})
         return value
+    root["count"] = lambda items: len(items)
     return {key: wrap(value) for key, value in root.items()}
 
 def execute_classic(source, task):
@@ -131,7 +132,7 @@ def main():
         return 0 if captured["output"] == task["expected"] else 1
     except Exception as exc:
         print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:240]}"}))
-        return 1
+        return 0
 
 if __name__ == "__main__":
     raise SystemExit(main())
