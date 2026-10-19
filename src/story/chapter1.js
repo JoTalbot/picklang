@@ -10,7 +10,8 @@ window.STORY = window.STORY || {};
 
 STORY.wake = {
   chapter: 1,
-  art: "assets/art/web/wake.jpg",
+  art: ["assets/art/web/wake.jpg", "assets/art/web/wake_steam.jpg"],
+  frameMs: 2400,
   title: "Медотсек · время неизвестно",
   text: [
     "Крышка капсулы отходит с шипением, будто кто-то очень устало выдохнул. В лицо бьёт холод. Пахнет озоном и мокрым металлом.",
@@ -75,7 +76,8 @@ STORY.vera_event = {
 STORY.medbay_look = {
   chapter: 1,
   title: "Медотсек · без голоса",
-  art: "assets/art/web/wake.jpg",
+  art: ["assets/art/web/wake.jpg", "assets/art/web/wake_steam.jpg"],
+  frameMs: 2400,
   text: [
     "Ты выбираешься сама. Пол холодный даже через носки. Восемь капсул — семь открыты, одна разбита изнутри.",
     "На полу — бурые разводы, которые кто-то пытался вытереть и бросил на середине. На стене, у самой двери, четыре длинные царапины. Слишком высоко для кошки.",

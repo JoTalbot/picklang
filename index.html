@@ -14,7 +14,8 @@
 
   <!-- ══════════ СТАРТОВЫЙ ЭКРАН ══════════ -->
   <section id="screen-start" class="screen">
-    <div class="start-inner">
+    <div class="start-bg" id="start-bg"></div>
+    <div class="start-inner start-inner-top">
       <div class="logo">🛰</div>
       <h1 class="title">ОРБИТА-9</h1>
       <p class="subtitle">Текстовая ролевая игра<br>про станцию, которая ломается</p>
@@ -51,7 +52,10 @@
 
     <main class="scene" id="scene">
       <figure class="art-wrap hidden" id="art-wrap">
-        <img id="art" class="art" alt="">
+        <div class="art-stage">
+          <img id="art" class="art" alt="">
+          <img id="art-b" class="art art-top" alt="" aria-hidden="true">
+        </div>
         <!-- «Плашка» прямо на арте: где ты сейчас и какие есть ходы -->
         <div class="art-overlay">
           <div class="ov-top"><span id="ov-chapter" class="ov-chapter"></span></div>

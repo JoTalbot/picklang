@@ -45,7 +45,8 @@ STORY.reactor_door = {
 
 STORY.reactor_bay = {
   chapter: 2,
-  art: "assets/art/web/reactor.jpg",
+  art: ["assets/art/web/reactor.jpg", "assets/art/web/reactor_peak.jpg", "assets/art/web/reactor_dim.jpg"],
+  frameMs: 2200,
   title: "Реакторный отсек",
   text: [
     "Реактор — не машина, а колодец света. Он гудит так низко, что звук слышно не ушами, а зубами.",
@@ -99,7 +100,8 @@ STORY.tech_help = {
 
 STORY.reactor_panel = {
   chapter: 2,
-  art: "assets/art/web/reactor.jpg",
+  art: ["assets/art/web/reactor.jpg", "assets/art/web/reactor_peak.jpg", "assets/art/web/reactor_dim.jpg"],
+  frameMs: 2000,
   title: "Пульт реактора",
   status: function (s) {
     if (s.flags.reactorStable) return "<b>Реактор</b> · мощность восстановлена · оранжерея обесточена";
@@ -150,7 +152,8 @@ STORY.reactor_panel = {
 STORY.reactor_repair = {
   chapter: 2,
   title: "Пульт реактора · успех",
-  art: "assets/art/web/reactor_panel.jpg",
+  art: ["assets/art/web/reactor.jpg", "assets/art/web/reactor_peak.jpg"],
+  frameMs: 1800,
   text: [
     "Ты работаешь быстро и без спешки — так, как учили: сначала холодный контур, потом балансировка, потом уже всё остальное.",
     "Стрелка на экране вздрагивает и замирает в зелёной зоне. Гул реактора меняет тон: теперь он ровный, как дыхание спящего.",
@@ -166,7 +169,8 @@ STORY.reactor_repair = {
 STORY.reactor_repair_fail = {
   chapter: 2,
   title: "Пульт реактора · сбой",
-  art: "assets/art/web/reactor_panel.jpg",
+  art: ["assets/art/web/reactor.jpg", "assets/art/web/reactor_dim.jpg"],
+  frameMs: 1600,
   text: [
     "Щелчок — и всё идёт не так. Из-под панели вырывается струя горячего пара. Ты успеваешь отшатнуться, но недостаточно далеко.",
     "Скафандр выдерживает. Индикатор на груди теряет одну точку и начинает мигать.",
@@ -265,7 +269,8 @@ STORY.shuttle_check = {
 
 STORY.vera_core = {
   chapter: 2,
-  art: "assets/art/web/vera.jpg",
+  art: ["assets/art/web/vera.jpg", "assets/art/web/vera_peak.jpg", "assets/art/web/vera_dim.jpg"],
+  frameMs: 2600,
   title: "Ядро ВЕРЫ",
   text: [
     "Ядро — это не экран с лицом. Это стойка, обмотанная трубками охлаждения, и внутри неё — свет, который дышит.",
@@ -282,7 +287,8 @@ STORY.vera_core = {
 
 STORY.vera_confess = {
   chapter: 2,
-  art: "assets/art/web/vera.jpg",
+  art: ["assets/art/web/vera.jpg", "assets/art/web/vera_peak.jpg", "assets/art/web/vera_dim.jpg"],
+  frameMs: 2400,
   title: "Ядро ВЕРЫ · признание",
   text: function (s) {
     const lines = [];
@@ -309,7 +315,8 @@ STORY.vera_confess = {
 
 STORY.vera_trust = {
   chapter: 2,
-  art: "assets/art/web/vera.jpg",
+  art: ["assets/art/web/vera.jpg", "assets/art/web/vera_peak.jpg"],
+  frameMs: 2000,
   title: "Ядро ВЕРЫ · доверие",
   text: [
     "«Могу, — говорит ВЕРА. — Но я должна предупредить: если ты возьмёшь управление, я перестану быть той, кто решает. Я стану инструментом. Люди редко понимают, что это тоже выбор».",
@@ -345,7 +352,8 @@ STORY.signal_scene = {
 STORY.signal_reply = {
   chapter: 2,
   title: "Передатчик · ответ",
-  art: "assets/art/web/signal.jpg",
+  art: ["assets/art/web/signal.jpg", "assets/art/web/signal_wave.jpg"],
+  frameMs: 1200,
   text: [
     "Ты отправляешь вниз самое простое, что можно отправить: ритм. Три удара — пауза. Три удара.",
     "Ответ приходит через четыре секунды. Не три всплеска. Пять.",

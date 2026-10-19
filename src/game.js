@@ -42,6 +42,10 @@ const Game = (function () {
       });
     });
 
+    // фон стартового экрана — обложка игры
+    const bg = UI.$("start-bg");
+    if (bg) bg.style.backgroundImage = 'url("assets/art/web/title.jpg")';
+
     const saved = Save.read();
     UI.$("btn-continue").classList.toggle("hidden", !saved);
     UI.showScreen("start");
@@ -136,7 +140,7 @@ const Game = (function () {
 
     UI.hideCheck();
     UI.renderTopbar(state);
-    UI.renderArt(scene.art);
+    UI.renderArt(scene.art, scene.frameMs);
     UI.renderText(scene, state);
     UI.renderChoices(scene, state, handleChoice);
 

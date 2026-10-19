@@ -58,6 +58,26 @@ body::before {
 .hidden { display: none !important; }
 
 /* ────────── стартовый экран ────────── */
+.start-bg {
+  position: fixed;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  opacity: .38;
+  filter: saturate(.85) contrast(1.05);
+  animation: slowzoom 30s ease-in-out infinite alternate;
+  z-index: 0;
+  pointer-events: none;
+}
+.screen { position: relative; }
+.start-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 40%, #0b0f1400 0%, #0b0f14dd 72%);
+}
+.start-inner-top { position: relative; z-index: 2; }
+
 .start-inner {
   flex: 1;
   display: flex;
@@ -166,7 +186,47 @@ body::before {
   background: #0e151d;
   animation: fadein .5s ease both;
 }
-.art { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; }
+/* ── кадры сцены: два слоя картинок, между ними «перекрёстное
+   растворение». Пока один кадр уходит, второй уже проявился. */
+.art-stage {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #0e151d;
+}
+.art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transform: scale(1);
+  animation: slowzoom 22s ease-in-out infinite alternate;
+}
+.art-top {
+  z-index: 2;
+  opacity: 0;
+  transition: opacity .9s ease;
+  pointer-events: none;
+}
+@keyframes slowzoom {
+  from { transform: scale(1); }
+  to   { transform: scale(1.045); }
+}
+
+/* появление новой сцены: картинка «проявляется» и чуть отъезжает */
+.art-wrap { animation: artin .55s cubic-bezier(.2,.7,.3,1) both; }
+@keyframes artin {
+  from { opacity: 0; transform: translateY(10px) scale(.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* если у человека в системе включено «уменьшить движение» — не мучаем */
+@media (prefers-reduced-motion: reduce) {
+  .art, .art-wrap, .scene-text p, .choice, .sheet-card { animation: none !important; }
+  .art-top { transition: none; }
+}
 
 /* ── плашка на арте: «где ты сейчас» и «какие есть ходы» ──
    Сделана кодом, а не нарисована на картинке: так текст всегда

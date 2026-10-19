@@ -8,7 +8,8 @@
 
 STORY.alarm = {
   chapter: 3,
-  art: "assets/art/web/alarm.jpg",
+  art: ["assets/art/web/alarm.jpg", "assets/art/web/alarm_peak.jpg"],
+  frameMs: 1400,
   title: "Коридор · тревога",
   status: function (s) {
     return "<b>Тревога</b> · контур держится " + (s.flags.reactorStable ? "на пределе" : "хуже, чем хотелось") +
@@ -74,7 +75,8 @@ STORY.gather = {
 
 STORY.final_choice = {
   chapter: 3,
-  art: "assets/art/web/alarm.jpg",
+  art: ["assets/art/web/alarm.jpg", "assets/art/web/alarm_peak.jpg", "assets/art/web/final_choice.jpg"],
+  frameMs: 2200,
   title: "Точка невозврата",
   status: function (s) {
     const parts = ["<b>Точка невозврата</b>"];
@@ -174,7 +176,8 @@ STORY.end_stay = {
 
 STORY.end_beacon = {
   chapter: 3,
-  art: "assets/art/web/signal.jpg",
+  art: ["assets/art/web/end_beacon.jpg", "assets/art/web/beacon_peak.jpg", "assets/art/web/beacon_dim.jpg"],
+  frameMs: 2800,
   title: "Финал: Пять всплесков",
   ending: "Пять всплесков",
   text: function (s) {

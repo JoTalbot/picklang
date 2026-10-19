@@ -105,7 +105,14 @@ function boot() {
   const ctx = {
     console: { log: () => {}, warn: () => {}, error: console.error },
     Math, Date, JSON, Object, Array, String, Number, Boolean, parseInt, parseFloat, isNaN,
-    setTimeout: (fn) => fn(),          // таймеры выполняем сразу
+    /* Все таймеры выполняем сразу: в тесте время условное.
+       Покадровую анимацию отключаем флагом __NO_ANIM, иначе её
+       бесконечный цикл кадров не даст тесту закончиться. */
+    setTimeout: (fn) => fn(),
+    clearTimeout: () => {},
+    requestAnimationFrame: (fn) => { fn(); return 0; },
+    matchMedia: () => ({ matches: false }),
+    Image: function () { this.src = ""; },
     document: doc,
     localStorage: {
       getItem: (k) => (k in store ? store[k] : null),
@@ -116,6 +123,7 @@ function boot() {
   };
   ctx.window = ctx;
   ctx.window.scrollTo = () => {};
+  ctx.__NO_ANIM = true;   // см. src/ui.js: отключает покадровую анимацию
   vm.createContext(ctx);
 
   /* В браузере все файлы живут в одной общей области видимости,

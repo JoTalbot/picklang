@@ -52,7 +52,10 @@ def inline_script(match):
 html = re.sub(r'<script src="([^"]+)"></script>', inline_script, html)
 
 # ── 3. Картинки: пути -> base64 внутри данных истории ────────
-art_dir = os.path.join(ROOT, "assets/art/web")
+# Для одного файла берём облегчённый набор (880 px), если он есть:
+# 11 МБ в мессенджере открываются плохо, 3 МБ — нормально.
+LIGHT = os.path.join(ROOT, "assets/art/web-light")
+art_dir = LIGHT if os.path.isdir(LIGHT) else os.path.join(ROOT, "assets/art/web")
 uris = {}
 for name in os.listdir(art_dir):
     if name.endswith(".jpg"):

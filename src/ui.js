@@ -28,18 +28,82 @@ const UI = (function () {
     suit.title = "Целостность скафандра: " + state.suit + " из 4";
   }
 
-  /* ── Картинка сцены ───────────────────────────────────── */
-  function renderArt(artPath) {
+  /* ── Картинка сцены: покадровая анимация ────────────────
+     Сцена может дать один кадр (строка) или несколько (массив).
+     Несколько — значит место «живёт»: свет в реакторе пульсирует,
+     ядро ВЕРЫ дышит, волна в атмосфере накатывает.
+     Показ устроен как в кино: кадр A проявляет кадр B, потом
+     B становится основным, и так по кругу.                       */
+
+  let artTimer = null;
+  let artToken = 0;   // чтобы старый цикл не «догнал» новую сцену
+
+  function stopArt() {
+    if (artTimer) { clearTimeout(artTimer); artTimer = null; }
+    artToken++;
+  }
+
+  function renderArt(artPath, frameMs) {
+    stopArt();
+
     const wrap = $("art-wrap");
-    const img = $("art");
-    if (!artPath) {
+    const frames = Array.isArray(artPath) ? artPath.slice() : (artPath ? [artPath] : []);
+
+    if (frames.length === 0) {
       wrap.classList.add("hidden");
       return;
     }
+
     wrap.classList.remove("hidden");
-    img.onerror = function () { wrap.classList.add("hidden"); };
-    img.src = artPath;
-    img.alt = "Иллюстрация сцены";
+    // перезапускаем анимацию появления сцены
+    wrap.style.animation = "none";
+    void wrap.offsetWidth;
+    wrap.style.animation = "";
+
+    const a = $("art");
+    const b = $("art-b");
+
+    a.onerror = function () { wrap.classList.add("hidden"); };
+    a.src = frames[0];
+    a.alt = "Иллюстрация сцены";
+    b.src = "";
+    b.style.opacity = "0";
+
+    if (frames.length < 2) return;
+
+    // заранее загружаем все кадры, чтобы не мигало при смене
+    frames.forEach(function (src) { const im = new Image(); im.src = src; });
+
+    const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) return;        // человек просил меньше движения — показываем один кадр
+    if (window.__NO_ANIM) return;  // автотест без экрана: кадры не крутим
+
+    const token = artToken;
+    const speed = frameMs || 2600;
+    let i = 0;
+
+    function step() {
+      if (token !== artToken) return;          // сцена уже сменилась
+
+      const next = frames[(i + 1) % frames.length];
+      b.src = next;
+
+      // даём браузеру кадр на отрисовку, потом плавно проявляем
+      requestAnimationFrame(function () {
+        if (token !== artToken) return;
+        b.style.opacity = "1";
+      });
+
+      artTimer = setTimeout(function () {
+        if (token !== artToken) return;
+        a.src = next;               // основной слой догнал
+        b.style.opacity = "0";      // верхний слой снова прозрачный
+        i = (i + 1) % frames.length;
+        artTimer = setTimeout(step, speed);
+      }, 950);
+    }
+
+    artTimer = setTimeout(step, speed);
   }
 
   /* ── Плашка поверх арта ────────────────────────────────
