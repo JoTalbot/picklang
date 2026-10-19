@@ -53,6 +53,8 @@ def run_one(command, task, timeout):
                     "stdout": proc.stdout[-2000:]}
         row = {"task": task["task"], "ok": result["ok"], "seconds": elapsed,
                "output": result.get("output")}
+        if "error" in result:
+            row["error"] = str(result["error"])[:1000]
         for field in ("prompt_tokens", "completion_tokens", "attempts", "model"):
             if field in result:
                 row[field] = result[field]
