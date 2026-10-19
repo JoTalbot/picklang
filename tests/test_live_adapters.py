@@ -30,10 +30,13 @@ def test_classic_adapter_rejects_imports_and_unlisted_attributes():
 
 def test_live_fixture_matches_canonical_inputs():
     fixture = json.loads(Path("bench/live_paired_tasks.json").read_text(encoding="utf-8"))
-    assert len(fixture) == len(TASKS) == 6
+    assert len(fixture) == 6
     for row in fixture:
         task = next(item for item in TASKS if item["name"] == row["task"])
         assert row["input"]["inputs"] == task["inputs"]
+    # Paired A/B намеренно покрывает только straight-line подмножество: саги,
+    # стражи, @wait, || и бюджет не выразить в ограниченном Python-адаптере.
+    assert {row["task"] for row in fixture} < {item["name"] for item in TASKS}
 
 
 

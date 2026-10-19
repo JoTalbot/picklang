@@ -22,20 +22,17 @@ from picklang.interpreter import run_program        # noqa: E402
 from picklang.live_agent import load_key            # noqa: E402
 from picklang.stdlib import with_stdlib             # noqa: E402
 
-GRAMMAR = """Ты пишешь программы на языке PICK. Верни ТОЛЬКО код, без пояснений и без markdown.
-Синтаксис (одна строка = один шаг):
-> name(param)            — заголовок, параметры через запятую
-x = fn(a, b)             — вызов функции хоста, результат в x
-x = fn(a) >> top(1)      — пайплайн: top(n), fields("k"), count()
-? x.ok -> fail "msg"     — страж: упасть, если условие ложно (guard: fail unless true)
-out x                    — результат программы
-Доступны только перечисленные функции хоста. Обращение к полям: p.tx
-Пример:
-> t(u)
-p = bank.charge(u, 5)
-out p.tx
+GRAMMAR = """PICK: code only (no markdown), line = step.
+> f(a) header, inputs
+!budget steps<20 budget
+x = fn(a) call -> x; fields: p.tx
+x = fn(a) ! u(b) saga: undo on failure, LIFO
+a = f(x) || b = g(x) parallel
+x = fn(a) >> top(2) pipeline: top(n), fields("k"), count()
+? c -> fail "m" fail unless c
+@wait s wait; signal -> s
+out {k: x} result
 """
-
 TASKS = [
     {"name": "charge_tx", "task": "Спиши с пользователя u сумму 5 через bank.charge(u, amount) -> {ok, tx}. Верни tx.",
      "tools": ["bank.charge"], "registry": {"bank.charge": lambda u, a: {"ok": True, "tx": "t1"}},
@@ -56,6 +53,36 @@ TASKS = [
      "tools": ["db.create_sub", "mail.send"],
      "registry": {"db.create_sub": lambda u: {"id": "s1"}, "mail.send": lambda u, sub_id: {"id": "m1"}},
      "inputs": {"u": "x"}, "expected": {"sub": "s1", "message": "m1"}},
+    # Вторая волна: конструкции, ради которых язык существует и которые
+    # раньше не проверялись живым прогоном вовсе (страж, сага, @wait, ||, бюджет).
+    {"name": "guard_pass",
+     "task": "Спиши bank.charge(u, amt) -> {ok, tx}. Поставь страж: если ok ложно — отказ. Верни tx.",
+     "tools": ["bank.charge"], "registry": {"bank.charge": lambda u, a: {"ok": True, "tx": "t7"}},
+     "inputs": {"u": "x", "amt": 5}, "expected": "t7"},
+    {"name": "guard_decline",
+     "task": "Спиши bank.charge(u, amt) -> {ok, tx}. Поставь страж: если ok ложно — отказ. Банк вернул ok=False: программа обязана упасть.",
+     "tools": ["bank.charge"], "registry": {"bank.charge": lambda u, a: {"ok": False, "tx": "t0"}},
+     "inputs": {"u": "x", "amt": 5}, "expect_error": True},
+    {"name": "saga_rollback",
+     "task": "Спиши bank.charge(u, amt) -> {ok, tx} с компенсацией bank.refund(tx) и стражем: ok ложно — отказ. "
+             "Банк отклоняет платёж: программа падает, но bank.refund обязан быть вызван ровно один раз.",
+     "tools": ["bank.charge", "bank.refund"],
+     "registry": {"bank.charge": lambda u, a: {"ok": False, "tx": "t0"},
+                  "bank.refund": lambda tx: {"refunded": tx}},
+     "inputs": {"u": "x", "amt": 5}, "expect_error": True, "after": {"bank.refund": 1}},
+    {"name": "wait_approval",
+     "task": "Дождись внешнего сигнала approval (значение придёт в переменную approval), "
+             "поставь страж: ложь — отказ. Верни id из mail.send(user, \"ok\").",
+     "tools": ["mail.send"], "registry": {"mail.send": lambda user, text: {"id": "m3"}},
+     "inputs": {"user": "x"}, "signals": {"approval": True}, "expected": "m3"},
+    {"name": "parallel_two",
+     "task": "Вызови a = left(x) и b = right(x) параллельными ветвями (одним символом ||). Верни {a, b}.",
+     "tools": ["left", "right"], "registry": {"left": lambda x: x + 1, "right": lambda x: x * 10},
+     "inputs": {"x": 2}, "expected": {"a": 3, "b": 20}},
+    {"name": "budget_stop",
+     "task": "Поставь бюджет !budget steps<1 и выполни два вызова tick(); бюджет обязан остановить программу падением.",
+     "tools": ["tick"], "registry": {"tick": lambda: {"ok": True}},
+     "inputs": {}, "expect_error": True},
 ]
 
 
@@ -68,17 +95,58 @@ def clean(text: str) -> str:
 
 
 def make_validator(task):
-    registry = with_stdlib(task["registry"])
+    """check + исполнение на моках. Поддерживает @wait-сигналы, ожидаемые падения
+    (expect_error) и проверку сайд-эффектов (after: {функция: сколько раз вызвана})."""
+    calls: dict[str, int] = {}
+
+    def counted(name, fn):
+        def wrapper(*args, **kwargs):
+            calls[name] = calls.get(name, 0) + 1
+            return fn(*args, **kwargs)
+        return wrapper
+
+    signals = task.get("signals") or {}
+    requested: list[str] = []
+
+    def gate(name, fn):
+        """Задача с @wait: инструмент недоступен, пока программа не дождалась сигнала.
+
+        Иначе программу без ожидания нельзя отличить от правильной: мок вернул бы
+        результат сразу, и валидатор зачёл бы обход durable-паузы.
+        """
+        if not signals:
+            return fn
+
+        def wrapper(*args, **kwargs):
+            missing = [s for s in signals if s not in requested]
+            if missing:
+                raise RuntimeError(f"signal not awaited: {', '.join(missing)}")
+            return fn(*args, **kwargs)
+        return wrapper
+
+    registry = with_stdlib({name: gate(name, counted(name, fn)) for name, fn in task["registry"].items()})
+
+    def effects_ok() -> bool:
+        return all(calls.get(name, 0) == want for name, want in (task.get("after") or {}).items())
+
+    def provider(name):
+        requested.append(name)
+        return signals.get(name)
+
     def valid(text: str) -> bool:
         src = clean(text)
         try:
             errors = [i for i in check_source(src, registry) if i.get("level") == "error"]
             if errors:
                 return False
-            out, _, _ = run_program(src, registry, dict(task["inputs"]), prefer_aot=False)
-            return out == task["expected"]
+            out, _, _ = run_program(src, registry, dict(task["inputs"]),
+                                    signal_provider=provider,
+                                    prefer_aot=False)
         except Exception:
+            return bool(task.get("expect_error")) and effects_ok()
+        if task.get("expect_error"):
             return False
+        return out == task["expected"] and effects_ok()
     return valid
 
 
