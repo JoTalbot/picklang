@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       run_live:
-        description: "Run the live OpenRouter cascade (uses OPENROUTER_TOKEN)"
+        description: "Run live OpenRouter cascade (uses API quota; run only when quota is available)"
         required: false
         default: true
         type: boolean
@@ -79,7 +79,7 @@ jobs:
       github.repository == 'JoTalbot/testing' &&
       github.ref == 'refs/heads/main' &&
       needs.tests.result == 'success' &&
-      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_live))
+      github.event_name == 'workflow_dispatch' && inputs.run_live
     runs-on: [self-hosted, linux, arm64]
     timeout-minutes: 25
     env:
