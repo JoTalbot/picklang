@@ -91,10 +91,12 @@ def compact_result(value: Any, max_tokens: int, cas=None) -> Any:
     # Drop optional fields in order, then fall back to the smallest useful marker.
     if estimate_tokens(result) > max_tokens:
         result.pop("tokens_full", None)
-    if estimate_tokens(result) > max_tokens:
-        result.pop("ref", None)
+    # When CAS is available, preserve the recovery pointer before the optional
+    # preview. A preview is convenient; losing the ref makes the full value unreachable.
     if estimate_tokens(result) > max_tokens:
         result.pop("preview", None)
+    if estimate_tokens(result) > max_tokens:
+        result.pop("ref", None)
     if estimate_tokens(result) > max_tokens:
         return {"truncated": True}
     return result
