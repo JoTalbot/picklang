@@ -180,3 +180,24 @@ def test_cli_reports_syntax_error_without_traceback(tmp_path):
     assert proc.returncode == 2
     assert "Traceback" not in proc.stderr
     assert "line 2" in proc.stderr
+
+
+# --- 5. Документированные литералы true/false/null -------------------------
+
+def test_boolean_and_null_literals_parse_as_data():
+    """parser.py обещает true/false/null как данные, а отдавал их переменными."""
+    from picklang.interpreter import run_program
+    from picklang.parser import parse
+
+    assert parse("> t()\nout true\n")[-1].expr == ("lit", True)
+    for expression, expected in (("true", True), ("false", False), ("null", None),
+                                 ("True", True), ("False", False), ("None", None)):
+        out = run_program(f"> t()\nout {expression}\n", {}, {})[0]
+        assert out is expected, (expression, out)
+
+    # done when с литералом и страж-сравнение теперь работают
+    calls = []
+    src = "> t()\na = hold() ! free(a)\nout a\ndone when: a.ok == True\n"
+    registry = {"hold": lambda: (calls.append("hold"), {"ok": True})[1], "free": lambda a: calls.append("free")}
+    assert run_program(src, registry, {}, prefer_aot=False)[0] == {"ok": True}
+    assert calls == ["hold"]
