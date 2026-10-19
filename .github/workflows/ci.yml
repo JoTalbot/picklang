@@ -26,7 +26,7 @@ jobs:
     runs-on: [self-hosted, linux, arm64]
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Reject stale or untrusted run
@@ -42,7 +42,7 @@ jobs:
             echo "::error::Stale workflow: this run is not for the current main commit."
             exit 1
           fi
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -95,7 +95,7 @@ jobs:
       PICK_LIVE_API_URL: https://api.groq.com/openai/v1/chat/completions
       PICK_LIVE_MODEL_TIERS: ${{ vars.PICK_LIVE_MODEL_TIERS }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Reject stale run before using API quota
@@ -107,7 +107,7 @@ jobs:
             echo "::error::Refusing live API calls from an untrusted or stale workflow run."
             exit 1
           fi
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
