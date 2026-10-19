@@ -90,7 +90,7 @@ def execute_classic(source, task):
                 if not (
                     isinstance(cursor, ast.Name)
                     and cursor.id in local_names
-                    and len(chain) == 1
+                    and len(chain) == 2
                     and not chain[0].startswith("_")
                 ):
                     raise ValueError("attribute is not a declared host function or safe local field: " + dotted)
