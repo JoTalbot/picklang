@@ -65,21 +65,62 @@ def run_one(command, task, timeout):
                 "error": f"adapter timed out after {timeout}s"}
 
 
+def is_provider_rate_limit(row):
+    """Recognize provider throttling without treating ordinary task failures as quota events."""
+    text = " ".join(str(row.get(key, "")) for key in ("error", "stderr", "stdout")).lower()
+    return (
+        "429" in text
+        or "rate limit" in text
+        or "rate_limit" in text
+        or "quota exceeded" in text
+        or "too many requests" in text
+    )
+
+
+def skipped_row(task, repeat, reason):
+    return {
+        "task": task["task"],
+        "repeat": repeat,
+        "ok": False,
+        "seconds": 0,
+        "error": reason,
+        "skipped": True,
+    }
+
+
 def run_pair(tasks, pick_command, baseline_command, timeout=60, repeats=1):
     if not pick_command or not baseline_command:
         raise ValueError("both adapter commands are required")
     if timeout <= 0 or repeats < 1:
         raise ValueError("timeout must be positive and repeats must be at least one")
     pick_rows, baseline_rows = [], []
+    rate_limit_hit = False
+    stop_reason = "skipped because a provider rate limit was detected; no further API calls made"
     for repeat in range(repeats):
         for index, task in enumerate(tasks):
+            if rate_limit_hit:
+                pick_rows.append(skipped_row(task, repeat + 1, stop_reason))
+                baseline_rows.append(skipped_row(task, repeat + 1, stop_reason))
+                continue
             # Alternate execution order to reduce systematic first/second-run bias.
             commands = (("pick", pick_command), ("baseline", baseline_command))
             if (index + repeat) % 2:
                 commands = tuple(reversed(commands))
             pair = {}
+            rate_limited_adapter = None
             for name, command in commands:
-                pair[name] = run_one(command, task, timeout)
+                row = run_one(command, task, timeout)
+                pair[name] = row
+                if is_provider_rate_limit(row):
+                    rate_limited_adapter = name
+                    rate_limit_hit = True
+                    break
+            for name, command in commands:
+                if name not in pair:
+                    pair[name] = skipped_row(
+                        task, repeat + 1,
+                        f"skipped because {rate_limited_adapter} adapter hit a provider rate limit; no further API calls made",
+                    )
             for name, row in pair.items():
                 row["repeat"] = repeat + 1
                 row["input_digest"] = __import__("hashlib").sha256(
@@ -90,16 +131,18 @@ def run_pair(tasks, pick_command, baseline_command, timeout=60, repeats=1):
         "schema_version": 1,
         "tasks": [task["task"] for task in tasks],
         "repeats": repeats,
+        "status": "INCONCLUSIVE_RATE_LIMIT" if rate_limit_hit else "COMPLETED",
+        "rate_limit_detected": rate_limit_hit,
         "pick": pick_rows,
         "baseline": baseline_rows,
         "notes": [
             "Both adapters receive the same task name and input JSON.",
             "Adapter 'ok' is self-reported; configure adapters to apply the same task-specific validators.",
             "Raw outputs are retained for review; exact output equality is not a substitute for semantic equivalence.",
-            "Seconds are measured locally per adapter invocation; provider-side billing may differ."
+            "Seconds are measured locally per adapter invocation; provider-side billing may differ.",
+            "On provider rate limiting, the benchmark stops issuing calls immediately and marks remaining rows skipped; these rows are not valid task failures.",
         ]
     }
-
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
