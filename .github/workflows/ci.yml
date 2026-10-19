@@ -62,6 +62,11 @@ jobs:
           assert sdists, "source distribution was not produced"
           print("Built:", *(str(p) for p in sorted(wheels + sdists)), sep="\\n  ")
           PY
+      - name: Smoke-test built wheel in a clean environment
+        run: |
+          python -m venv /tmp/pick-wheel-check
+          /tmp/pick-wheel-check/bin/python -m pip install --no-deps dist/*.whl
+          /tmp/pick-wheel-check/bin/pick --help
       - name: Verify CLI and demo
         run: |
           pick --help
