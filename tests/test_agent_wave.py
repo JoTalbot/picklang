@@ -90,3 +90,25 @@ def test_parallel_branches_merge():
     reg = {"research": lambda q: ["r1"], "prices": lambda q: [10, 20]}
     out, env, _ = run_program('> t(q)\na = research(q) || b = prices(q)\nout {a: a, b: b}\n', reg, {"q": "x"})
     assert out == {"a": ["r1"], "b": [10, 20]}
+
+
+@pytest.mark.parametrize("value", [
+    {"payload": {"nested": "x" * 5000}, "other": "y" * 2000},
+    "z" * 10000,
+    [{"payload": "q" * 3000}] * 20,
+])
+def test_result_guard_enforces_budget_for_all_shapes(value):
+    from picklang.result_guard import compact_result
+
+    limit = 50
+    result = compact_result(value, max_tokens=limit)
+    assert result["truncated"] is True
+    assert estimate_tokens(result) <= limit
+
+
+def test_result_guard_handles_tiny_budget_and_rejects_invalid_budget():
+    from picklang.result_guard import compact_result
+
+    assert estimate_tokens(compact_result({"huge": "x" * 1000}, max_tokens=10)) <= 10
+    with pytest.raises(ValueError, match="max_tokens"):
+        compact_result("value", max_tokens=0)
