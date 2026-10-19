@@ -52,6 +52,8 @@ def generate(intent: dict[str, Any], registry: dict | None = None) -> str:
     if "goal" not in intent:
         raise GenesisError("в намерении нет goal")
     lines = [f"> {intent['goal']}({', '.join(intent.get('params', []))})"]
+    if intent.get("budget"):
+        lines.append("!budget " + ", ".join(f"{k}<{v}" for k, v in intent["budget"].items()))
     for step in intent.get("steps", []):
         if "wait" in step:
             lines.append(f"@wait {step['wait']}")
@@ -78,6 +80,8 @@ def generate(intent: dict[str, Any], registry: dict | None = None) -> str:
         if undo:
             line += f" ! {undo}"
         lines.append(line)
+    if intent.get("done_when"):
+        lines.append("done when: " + ", ".join(intent["done_when"]))
     out = intent.get("out")
     if isinstance(out, dict):
         body = ", ".join(f"{k}: {_fmt_arg(v)}" for k, v in out.items())

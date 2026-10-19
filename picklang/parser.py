@@ -26,7 +26,7 @@ class PickSyntaxError(Exception):
 
 @dataclass
 class Step:
-    kind: str                      # goal|assign|expr|guard|wait|out
+    kind: str                      # goal|assign|expr|guard|wait|out|budget|donewhen|parallel
     line: int
     target: str | None = None      # переменная слева от =
     expr: Any = None               # выражение (см. _parse_expr)
@@ -34,6 +34,8 @@ class Step:
     signal: str | None = None
     name: str | None = None        # имя цели / сигнала
     params: list[str] = field(default_factory=list)
+    budget: dict = field(default_factory=dict)      # для kind=budget
+    branches: list = field(default_factory=list)     # для kind=parallel: [(target, expr)]
 
 
 # Выражение кодируем простыми кортежами — IR должен быть JSON-сериализуемым:
@@ -42,6 +44,10 @@ def _parse_expr(text: str, line: int, raw: str):
     text = text.strip()
     if not text:
         raise PickSyntaxError(line, raw, "пустое выражение")
+    cmp_op = _find_cmp(text)
+    if cmp_op:
+        op, idx = cmp_op
+        return ("cmp", op, _parse_expr(text[:idx], line, raw), _parse_expr(text[idx + len(op):], line, raw))
     if ">>" in text:
         return ("pipe", [_parse_expr(part, line, raw) for part in _split_top(text, ">>")])
     m = re.fullmatch(r"([A-Za-z_][\w.]*)\((.*)\)", text, re.S)
@@ -66,6 +72,27 @@ def _parse_expr(text: str, line: int, raw: str):
         return ("lit", value)
     except Exception:
         raise PickSyntaxError(line, raw, f"не понимаю выражение '{text}': ожидается вызов, переменная или литерал")
+
+
+def _find_cmp(text: str):
+    """Найти сравнение верхнего уровня (==, !=, >=, <=, >, <) вне скобок и строк."""
+    depth, quote, i = 0, None, 0
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            if ch == quote: quote = None
+            i += 1; continue
+        if ch in "\"'": quote = ch; i += 1; continue
+        if ch in "([{": depth += 1
+        elif ch in ")]}": depth -= 1
+        elif depth == 0:
+            for op in ("==", "!=", ">=", "<="):
+                if text.startswith(op, i): return op, i
+            if text.startswith(">>", i):
+                i += 2; continue
+            if ch in "><": return ch, i
+        i += 1
+    return None
 
 
 def _split_top(text: str, sep: str) -> list[str]:
@@ -117,6 +144,29 @@ def parse(source: str) -> list[Step]:
                 raise PickSyntaxError(lineno, raw, 'страж записывается как: ? условие -> fail "причина"')
             steps.append(Step("guard", lineno, expr=_parse_expr(m.group(1), lineno, raw),
                               target=_parse_expr(m.group(2), lineno, raw)))
+            continue
+        if line.startswith("!budget"):
+            budget = {}
+            for part in line[len("!budget"):].split(","):
+                m = re.fullmatch(r"\s*(steps|tokens|retries)<(\d+)\s*", part)
+                if not m:
+                    raise PickSyntaxError(lineno, raw, "бюджет записывается как: !budget steps<20, tokens<4000")
+                budget[m.group(1)] = int(m.group(2))
+            steps.append(Step("budget", lineno, budget=budget))
+            continue
+        if line.startswith("done when:"):
+            exprs = [_parse_expr(e, lineno, raw) for e in _split_top(line[len("done when:"):], ",")]
+            steps.append(Step("donewhen", lineno, expr=exprs))
+            continue
+        if " || " in line:
+            branches = []
+            for part in _split_top(line, "||"):
+                if "=" in part:
+                    lhs, rhs = part.split("=", 1)
+                    branches.append((lhs.strip(), _parse_expr(rhs, lineno, raw)))
+                else:
+                    branches.append((None, _parse_expr(part, lineno, raw)))
+            steps.append(Step("parallel", lineno, branches=branches))
             continue
         if line.startswith("out "):
             steps.append(Step("out", lineno, expr=_parse_expr(line[4:], lineno, raw)))

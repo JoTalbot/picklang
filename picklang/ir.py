@@ -24,6 +24,8 @@ def _expr_ir(expr) -> Any:
         return {"get": expr[1]}
     if kind == "map":
         return {"map": [[k, _expr_ir(v)] for k, v in expr[1]]}
+    if kind == "cmp":
+        return {"cmp": [expr[1], _expr_ir(expr[2]), _expr_ir(expr[3])]}
     if kind == "pipe":
         return {"pipe": [_expr_ir(e) for e in expr[1]]}
     raise ValueError(kind)
@@ -38,7 +40,11 @@ def compile_ir(source: str) -> dict[str, Any]:
         if s.params: item["params"] = s.params
         if s.target and s.kind == "assign": item["target"] = s.target
         if s.signal: item["signal"] = s.signal
-        if s.expr is not None: item["expr"] = _expr_ir(s.expr)
+        if s.budget: item["budget"] = s.budget
+        if s.branches: item["branches"] = [[tgt, _expr_ir(e)] for tgt, e in s.branches]
+        if s.kind == "donewhen":
+            item["conditions"] = [_expr_ir(e) for e in s.expr]
+        elif s.expr is not None: item["expr"] = _expr_ir(s.expr)
         if s.kind == "guard": item["fail"] = _expr_ir(s.target)
         if s.compensation is not None: item["compensation"] = _expr_ir(s.compensation)
         ir_steps.append(item)
