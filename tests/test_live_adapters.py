@@ -34,3 +34,31 @@ def test_live_fixture_matches_canonical_inputs():
     for row in fixture:
         task = next(item for item in TASKS if item["name"] == row["task"])
         assert row["input"]["inputs"] == task["inputs"]
+
+
+
+def test_failed_cascade_preserves_usage_and_model():
+    from types import SimpleNamespace
+
+    from bench_live_adapters import cascade_usage
+
+    cascade = SimpleNamespace(log=[
+        {"model": "openai/gpt-oss-20b", "usage": {"prompt_tokens": 281, "completion_tokens": 252}},
+        {"model": "openai/gpt-oss-20b", "usage": {"prompt_tokens": 295, "completion_tokens": 768}},
+    ])
+    assert cascade_usage(cascade) == {
+        "attempts": 2,
+        "prompt_tokens": 576,
+        "completion_tokens": 1020,
+        "model": "openai/gpt-oss-20b",
+    }
+
+
+def test_missing_cascade_has_zero_usage():
+    from bench_live_adapters import cascade_usage
+
+    assert cascade_usage(None) == {
+        "attempts": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+    }

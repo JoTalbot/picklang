@@ -99,11 +99,28 @@ def execute_classic(source, task):
     exec(compile(tree, "<classic-adapter>", "exec"), namespace, namespace)
     return namespace["solve"](**task["inputs"])
 
+def cascade_usage(cascade):
+    """Retain provider usage even when every generated candidate fails validation."""
+    entries = getattr(cascade, "log", []) if cascade is not None else []
+    totals = {"attempts": len(entries), "prompt_tokens": 0, "completion_tokens": 0}
+    model = None
+    for entry in entries:
+        usage = entry.get("usage") or {}
+        for field in ("prompt_tokens", "completion_tokens"):
+            totals[field] += usage.get(field, 0) or 0
+        if entry.get("model"):
+            model = entry["model"]
+    if model:
+        totals["model"] = model
+    return totals
+
+
 def main():
     mode = os.environ.get("PICK_AB_MODE", "")
     if mode not in {"pick", "classic"}:
         print("PICK_AB_MODE must be pick or classic", file=sys.stderr)
         return 2
+    cascade = None
     try:
         request = json.loads(sys.stdin.readline())
         task_name, supplied = request["task"], request["input"]
@@ -154,7 +171,9 @@ def main():
             "seconds": elapsed}, ensure_ascii=False))
         return 0 if captured["output"] == task["expected"] else 1
     except Exception as exc:
-        print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:240]}"}))
+        failure = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:240]}"}
+        failure.update(cascade_usage(cascade))
+        print(json.dumps(failure, ensure_ascii=False))
         return 0
 
 if __name__ == "__main__":
