@@ -62,3 +62,11 @@ def test_fuzz_parser_never_crashes_with_foreign_exceptions():
             parse(s)
         except PickSyntaxError:
             pass  # единственный легальный исход для мусора
+
+
+
+def test_aot_is_disabled_for_parallel_steps():
+    from picklang.interpreter import _aot_eligible
+
+    source = '> t(x)\na = f(x) || b = g(x)\nout {a: a, b: b}\n'
+    assert _aot_eligible(source, None, None, ()) is False
