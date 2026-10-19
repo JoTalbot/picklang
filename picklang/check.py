@@ -121,3 +121,50 @@ def check_ir(ir: dict[str, Any], registry: dict | None = None) -> list[dict[str,
 def check_source(source: str, registry: dict | None = None) -> list[dict[str, Any]]:
     from .ir import compile_ir
     return check_ir(compile_ir(source), registry)
+
+
+def check_contracts(source: str, contracts: dict[str, dict]) -> list[dict[str, Any]]:
+    """П.7 — Контракты функций: поля результатов и арность по схемам хоста.
+
+    contracts = {"bank.charge": {"args": ["user", "amt"], "returns": ["ok", "tx"]}}
+    Ловит классическую ошибку слабых моделей: charge(...).track вместо .tx.
+    """
+    from .ir import compile_ir
+    ir = compile_ir(source)
+    diags: list[dict[str, Any]] = []
+    produced_by: dict[str, str] = {}
+    for step in ir["steps"]:
+        expr = step.get("expr") or {}
+        if step["kind"] == "assign" and isinstance(expr, dict) and "call" in expr:
+            produced_by[step.get("target")] = expr["call"]
+            spec = contracts.get(expr["call"])
+            if spec and "args" in spec and len(expr.get("args", [])) != len(spec["args"]):
+                diags.append({"line": step["line"], "code": "CONTRACT_ARITY",
+                              "message": f"{expr['call']} ждёт аргументы {spec['args']}"})
+        def walk(e):
+            if isinstance(e, dict):
+                if "get" in e:
+                    root, _, field = e["get"].partition(".")
+                    fn = produced_by.get(root)
+                    spec = contracts.get(fn or "", {})
+                    if fn and spec.get("returns") and field not in spec["returns"]:
+                        diags.append({"line": step["line"], "code": "UNKNOWN_FIELD",
+                                      "message": f"у результата {fn} нет поля .{field}; есть: {spec['returns']}"})
+                for v in e.values():
+                    if isinstance(v, dict): walk(v)
+                    elif isinstance(v, list):
+                        for it in v:
+                            if isinstance(it, dict): walk(it)
+                            elif isinstance(it, list) and len(it) == 2: walk(it[1])
+        for key in ("expr", "compensation"):
+            if key in step: walk(step[key])
+    return diags
+
+
+def check_effects(source: str) -> list[dict[str, Any]]:
+    """П.5 — Денежные/необратимые шаги без компенсации получают предупреждение."""
+    from .parser import parse
+    return [{"line": s.line, "code": "EFFECT_NO_COMPENSATION",
+             "message": f"шаг с эффектом {s.effect} без компенсации ! — откат нечем делать"}
+            for s in parse(source) if s.effect in ("money", "irreversible") and s.compensation is None]
+

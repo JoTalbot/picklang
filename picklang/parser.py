@@ -36,6 +36,12 @@ class Step:
     params: list[str] = field(default_factory=list)
     budget: dict = field(default_factory=dict)      # для kind=budget
     branches: list = field(default_factory=list)     # для kind=parallel: [(target, expr)]
+    retries: int = 0                                 # суффикс ^N на шаге
+    effect: str | None = None                        # @fx read|write|money|irreversible
+    timeout: int | None = None                       # для wait: секунды
+    else_step: Any = None                            # для wait: шаг при таймауте
+    loop_var: str | None = None                      # для kind=loop
+    body: Any = None                                 # для kind=loop: вложенный Step
 
 
 # Выражение кодируем простыми кортежами — IR должен быть JSON-сериализуемым:
@@ -133,10 +139,25 @@ def parse(source: str) -> list[Step]:
             steps.append(Step("goal", lineno, name=m.group(1), params=params))
             continue
         if line.startswith("@wait"):
-            name = line[5:].strip()
-            if not re.fullmatch(r"[A-Za-z_]\w*", name):
-                raise PickSyntaxError(lineno, raw, "после @wait нужно имя сигнала: @wait approval")
-            steps.append(Step("wait", lineno, signal=name))
+            rest = line[5:].strip()
+            m = re.fullmatch(r"([A-Za-z_]\w*)(?:\s+:(\d+)([smh]))?(?:\s+else\s+(.+))?", rest)
+            if not m:
+                raise PickSyntaxError(lineno, raw, "ожидание записывается как: @wait approval или @wait approval :24h else <шаг>")
+            timeout = None
+            if m.group(2):
+                timeout = int(m.group(2)) * {"s": 1, "m": 60, "h": 3600}[m.group(3)]
+            else_step = None
+            if m.group(4):
+                else_step = parse(m.group(4))[0]
+            steps.append(Step("wait", lineno, signal=m.group(1), timeout=timeout, else_step=else_step))
+            continue
+        if line.startswith("for "):
+            m = re.fullmatch(r"for\s+([A-Za-z_]\w*)\s+in\s+(.+):\s*(.+)", line)
+            if not m:
+                raise PickSyntaxError(lineno, raw, "цикл записывается как: for item in items: <шаг одной строкой>")
+            body = parse(m.group(3))[0]
+            steps.append(Step("loop", lineno, loop_var=m.group(1),
+                              expr=_parse_expr(m.group(2), lineno, raw), body=body))
             continue
         if line.startswith("?"):
             m = re.fullmatch(r"\?\s*(.+?)\s*->\s*fail\s+(.+)", line)
@@ -171,6 +192,13 @@ def parse(source: str) -> list[Step]:
         if line.startswith("out "):
             steps.append(Step("out", lineno, expr=_parse_expr(line[4:], lineno, raw)))
             continue
+        retries, effect = 0, None
+        m = re.search(r"\s\^(\d+)\s*$", line)
+        if m:
+            retries, line = int(m.group(1)), line[:m.start()]
+        m = re.search(r"\s@fx\s+(read|write|money|irreversible)\s*$", line)
+        if m:
+            effect, line = m.group(1), line[:m.start()]
         if "=" in line and not line.startswith("="):
             lhs, rhs = line.split("=", 1)
             target = lhs.strip()
@@ -181,14 +209,16 @@ def parse(source: str) -> list[Step]:
                 rhs, comp_text = rhs.split(" ! ", 1)
                 comp = _parse_expr(comp_text, lineno, raw)
             steps.append(Step("assign", lineno, target=target,
-                              expr=_parse_expr(rhs, lineno, raw), compensation=comp))
+                              expr=_parse_expr(rhs, lineno, raw), compensation=comp,
+                              retries=retries, effect=effect))
             continue
         # выражение-шаг, возможно с компенсацией: call ! undo_call
         comp = None
         if " ! " in line:
             line, comp_text = line.split(" ! ", 1)
             comp = _parse_expr(comp_text, lineno, raw)
-        steps.append(Step("expr", lineno, expr=_parse_expr(line, lineno, raw), compensation=comp))
+        steps.append(Step("expr", lineno, expr=_parse_expr(line, lineno, raw), compensation=comp,
+                          retries=retries, effect=effect))
     if not steps:
         raise PickSyntaxError(0, "", "пустая программа")
     return steps

@@ -97,10 +97,12 @@ class Context:
 
 
 class DurableExecutor:
-    def __init__(self, workdir: str | Path, handlers: dict[str, Handler], crash_after: int | None = None):
+    def __init__(self, workdir: str | Path, handlers: dict[str, Handler], crash_after: int | None = None,
+                 storage: str = "jsonl"):
         self.workdir = Path(workdir)
         self.handlers = handlers
         self.crash_after = crash_after
+        self.storage = storage  # "jsonl" | "sqlite" — цепочка и гарантии те же
         self.cas = ContentAddressedStore(self.workdir / "cas")
         self.log: EventLog | None = None  # type: ignore
         self._completed: dict[str, str] = {}
@@ -109,7 +111,11 @@ class DurableExecutor:
 
     # --- жизненный цикл исполнения -------------------------------------
     def _load(self, execution_id: str) -> None:
-        self.log = EventLog(self.workdir / "executions" / execution_id / "events.jsonl")
+        if self.storage == "sqlite":
+            from .sqlite_backend import SQLiteEventLog
+            self.log = SQLiteEventLog(self.workdir / "executions" / execution_id / "events.db")
+        else:
+            self.log = EventLog(self.workdir / "executions" / execution_id / "events.jsonl")
         self._completed = {}
         self._signals = {}
         for ev in self.log.events:

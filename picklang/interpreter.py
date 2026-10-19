@@ -54,6 +54,9 @@ class _State:
         self.untrusted = set(untrusted)
         self.resolve_secrets = resolve_secrets
         self.lock = threading.Lock()
+        self.approved = False
+        self.effects: list[str] = []
+        self.tainted: set[str] = set()
 
     def charge_call(self, name: str, result: Any) -> Any:
         with self.lock:
@@ -127,6 +130,17 @@ def _call(expr, env, registry, hook, trace, state: _State, piped=...):
     fn = registry.get(name)
     if fn is None:
         raise PickRuntimeError(f"функция не зарегистрирована хостом: {name}")
+    # Taint: недоверенные данные не уходят в опасные приёмники без одобрения.
+    def _tainted_expr(e):
+        if not isinstance(e, tuple):
+            return False
+        if e[0] in ("var", "get"):
+            return e[1].split(".")[0] in state.tainted
+        return any(_tainted_expr(x) for x in e[1:] if isinstance(x, (tuple, list))) or \
+            any(_tainted_expr(x) for part in e[1:] if isinstance(part, list) for x in part if isinstance(x, tuple))
+    if name in ("mail.send", "bank.charge", "bank.refund", "db.write") and not state.approved and \
+            any(_tainted_expr(a) for a in arg_exprs):
+        raise PickRuntimeError(f"taint: результат недоверенного инструмента идёт в {name} без @wait approval")
     trace.append(name)
     result = hook(name, fn, args) if hook is not None else fn(*args)
     return state.charge_call(name, result)
@@ -143,8 +157,43 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
     compensations: list = []
     trace: list[str] = []
     state = _State(capabilities=capabilities, untrusted=untrusted)
+    state.approved = bool(env.get("approval"))
     output = None
     done_conditions: list = []
+    def execute_assign(step):
+        attempts = (step.retries or 0) + 1
+        last = None
+        for _attempt in range(attempts):
+            try:
+                value = _eval(step.expr, env, registry, activity_hook, trace, state)
+                break
+            except (WaitingSignal, AbortExecution, BudgetExceeded):
+                raise
+            except Exception as exc:
+                last = exc
+        else:
+            raise last  # type: ignore[misc]
+        if step.target:
+            env[step.target] = value
+            def _calls(e):
+                if isinstance(e, tuple):
+                    if e[0] == "call":
+                        yield e[1]
+                    for x in e[1:]:
+                        if isinstance(x, tuple):
+                            yield from _calls(x)
+                        elif isinstance(x, list):
+                            for y in x:
+                                if isinstance(y, tuple):
+                                    yield from _calls(y)
+            if any(c in state.untrusted for c in _calls(step.expr)):
+                state.tainted.add(step.target)
+        if step.effect:
+            state.effects.append(f"{step.effect}:{step.target or 'step'}")
+        if step.compensation is not None:
+            compensations.append(step.compensation)
+        return value
+
     try:
         for step in steps:
             if step.kind == "goal":
@@ -163,12 +212,16 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
                     for target, value in pool.map(run_branch, step.branches):
                         if target:
                             env[target] = value
+            elif step.kind == "loop":
+                items = _eval(step.expr, env, registry, activity_hook, trace, state)
+                for item in items:
+                    env[step.loop_var] = item
+                    if step.body.kind in ("assign", "expr"):
+                        execute_assign(step.body)
+                    else:
+                        raise PickRuntimeError("в теле for поддержан только шаг-вызов или присваивание")
             elif step.kind in ("assign", "expr"):
-                value = _eval(step.expr, env, registry, activity_hook, trace, state)
-                if step.target:
-                    env[step.target] = value
-                if step.compensation is not None:
-                    compensations.append(step.compensation)
+                execute_assign(step)
             elif step.kind == "guard":
                 ok = _eval(step.expr, env, registry, activity_hook, trace, state)
                 if not ok:
@@ -177,8 +230,18 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
             elif step.kind == "wait":
                 value = signal_provider(step.signal) if signal_provider else None
                 if value is None:
+                    if step.timeout is not None:
+                        # синхронный провайдер: нет сигнала = таймаут уже наступил
+                        if step.else_step is not None:
+                            alt = step.else_step
+                            if alt.kind in ("assign", "expr"):
+                                execute_assign(alt)
+                                continue
+                        raise PickRuntimeError(f"таймаут ожидания сигнала {step.signal} ({step.timeout}с)")
                     raise WaitingSignal(step.signal)
                 env[step.signal] = value
+                if step.signal == "approval":
+                    state.approved = bool(value)
             elif step.kind == "out":
                 output = _eval(step.expr, env, registry, activity_hook, trace, state)
     except (PickRuntimeError, WaitingSignal, AbortExecution):

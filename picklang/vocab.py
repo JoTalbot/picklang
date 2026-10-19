@@ -47,6 +47,42 @@ class Vocabulary:
         return self.cas.verify(self.index[alias]["ref"])
 
     # --- развёртка ------------------------------------------------------
+    _counter: int = 0
+
+    @staticmethod
+    def _rename_locals(body: str, alias: str, occurrence: int) -> str:
+        """Гигиена блоков: переменные, присвоенные внутри блока, получают
+        уникальный суффикс, чтобы два вызова &pay не делили одну `p`."""
+        import re as _re
+        locals_: list[str] = []
+        for line in body.splitlines():
+            m = _re.match(r"\s*([A-Za-z_]\w*)\s*=", line)
+            if m and m.group(1) not in locals_:
+                locals_.append(m.group(1))
+        if not locals_:
+            return body
+        # Последняя присвоенная переменная блока — его «экспорт» (на неё
+        # ссылается вызывающая программа, напр. p.tx у блока pay): не трогаем.
+        # Переименовываем только внутренние временные — они и давали коллизии.
+        export = locals_[-1] if locals_ else None
+        mapping = {name: f"{name}__{alias}{occurrence}" for name in locals_ if name != export}
+        def repl(m):
+            name, prefix = m.group(0), ""
+            return mapping.get(name, name)
+        out = []
+        for line in body.splitlines():
+            # переименовываем только корни идентификаторов (не поля после точки, не строки)
+            parts, quote, cur = [], None, ""
+            i = 0
+            tokens = _re.split(r'("[^"]*")', line)
+            done = []
+            for tok in tokens:
+                if tok.startswith('"'):
+                    done.append(tok); continue
+                done.append(_re.sub(r"(?<![\w.])[A-Za-z_]\w*", lambda m: mapping.get(m.group(0), m.group(0)), tok))
+            out.append("".join(done))
+        return "\n".join(out)
+
     def expand(self, source: str) -> str:
         out_lines: list[str] = []
         for raw in source.splitlines():
@@ -61,6 +97,8 @@ class Vocabulary:
             body = block["body"]
             for param, arg in zip(block["params"], args):
                 body = body.replace("{" + param + "}", arg)
+            Vocabulary._counter += 1
+            body = self._rename_locals(body, m.group(1), Vocabulary._counter)
             out_lines.extend(body.splitlines())
         result = "\n".join(out_lines) + "\n"
         from .parser import parse

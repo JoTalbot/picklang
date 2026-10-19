@@ -33,8 +33,13 @@ def load_key(key_file: str | None = None) -> str:
     raise LLMError("нет ключа: задайте OPENROUTER_API_KEY или --key-file")
 
 
-def chat(key: str, model: str, messages: list[dict], timeout: int = 180) -> tuple[str, dict]:
-    body = json.dumps({"model": model, "messages": messages, "temperature": 0}).encode()
+def chat(key: str, model: str, messages: list[dict], timeout: int = 180,
+         json_schema: dict | None = None) -> tuple[str, dict]:
+    payload: dict = {"model": model, "messages": messages, "temperature": 0}
+    if json_schema is not None:
+        # constrained decoding: провайдер не даст вернуть JSON вне схемы
+        payload["response_format"] = {"type": "json_schema", "json_schema": json_schema}
+    body = json.dumps(payload).encode()
     req = urllib.request.Request(API, data=body, headers={
         "Authorization": f"Bearer {key}", "Content-Type": "application/json",
         "HTTP-Referer": "https://github.com/JoTalbot/testing", "X-Title": "pick-live-cycle"})

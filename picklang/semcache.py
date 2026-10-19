@@ -32,6 +32,7 @@ class SemanticCache:
         if self.index_path.exists():
             self.index = json.loads(self.index_path.read_text(encoding="utf-8"))
         self.stats = {"hits": 0, "misses": 0}
+        self.fuzzy = False  # включается явно: cache.fuzzy = True
 
     def _save(self):
         self.index_path.write_text(json.dumps(self.index, indent=1), encoding="utf-8")
@@ -55,9 +56,39 @@ class SemanticCache:
 
     def put(self, name: str, args: list, result: Any) -> str:
         ref = self.cas.put_json(result)
-        self.index[self.key(name, args)] = {"ref": ref, "ts": time.time(), "fn": name}
+        self.index[self.key(name, args)] = {"ref": ref, "ts": time.time(), "fn": name,
+                                            "args_preview": json.loads(json.dumps(args, default=str))[:2]}
         self._save()
         return ref
+
+    def get_similar(self, name: str, args: list, threshold: float = 0.85) -> Any | None:
+        """Приблизительное попадание: тот же инструмент, текстовые аргументы
+        похожи по Жаккару на уровне слов >= threshold. Возвращает кэшированный
+        результат; решение о доверии — за стражем вызывающего кода."""
+        def words(v):
+            out = set()
+            if isinstance(v, str):
+                out |= set(v.lower().split())
+            elif isinstance(v, (list, dict)):
+                for x in (v.values() if isinstance(v, dict) else v):
+                    out |= words(x)
+            return out
+        target = words(args)
+        if not target:
+            return None
+        for key, entry in self.index.items():
+            if entry.get("fn") != name:
+                continue
+            # ключ — digest, аргументы не восстановимы; держим копию в индексе
+            cached_words = words(entry.get("args_preview", []))
+            if not cached_words:
+                continue
+            sim = len(target & cached_words) / max(1, len(target | cached_words))
+            if sim >= threshold and self.cas.verify(entry["ref"]):
+                self.stats["hits"] = self.stats.get("hits", 0) + 1
+                self.stats["fuzzy_hits"] = self.stats.get("fuzzy_hits", 0) + 1
+                return self.cas.get_json(entry["ref"])
+        return None
 
     def wrap_registry(self, registry: dict[str, Callable], cacheable: set[str]) -> dict[str, Callable]:
         """Обернуть cacheable-функции реестра; остальные проходят как есть."""
@@ -70,6 +101,8 @@ class SemanticCache:
             def make(name=name, fn=fn):
                 def call(*args):
                     hit = self.get(name, list(args))
+                    if hit is None and getattr(self, "fuzzy", False):
+                        hit = self.get_similar(name, list(args))
                     if hit is not None:
                         return hit
                     result = fn(*args)

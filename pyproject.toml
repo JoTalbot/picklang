@@ -10,6 +10,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 
+[project.scripts]
+pick = "picklang.cli:main"
+
 [project.optional-dependencies]
 bench = ["tiktoken>=0.7"]
 temporal = ["temporalio>=1.7"]

@@ -25,7 +25,20 @@ class SlotStore:
     def _save(self):
         self.index_path.write_text(json.dumps(self.index, indent=1), encoding="utf-8")
 
-    def put(self, name: str, value: Any) -> str:
+    def put(self, name: str, value: Any, max_tokens: int | None = None) -> str:
+        """При превышении бюджета слот хранит summary + ref на полное значение:
+        полное не теряется (оно в CAS), но в контекст ходит только выжимка."""
+        if max_tokens is not None:
+            from picklang.result_guard import estimate_tokens
+            if estimate_tokens(value) > max_tokens:
+                full_ref = self.cas.put_json(value)
+                text = str(value)
+                summary = {"summary": text[:400] + "…", "ref": full_ref,
+                           "tokens_full": estimate_tokens(value)}
+                ref = self.cas.put_json(summary)
+                self.index[name] = ref
+                self._save()
+                return ref
         ref = self.cas.put_json(value)
         self.index[name] = ref
         self._save()
