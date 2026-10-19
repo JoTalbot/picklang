@@ -1,0 +1,8 @@
+[
+  {"task":"charge_tx","input":{"description":"Charge user u 5 through bank.charge(u, amount) -> {ok, tx}; return tx.","inputs":{"u":"x"}}},
+  {"task":"search_top1","input":{"description":"Call web.search(q), return a one-item list containing only its first result.","inputs":{"q":"x"}}},
+  {"task":"double_value","input":{"description":"Call dbl(i) and return its result.","inputs":{"i":3}}},
+  {"task":"fields_a","input":{"description":"Call d.get(x) and return an object containing only field a.","inputs":{"x":1}}},
+  {"task":"count_results","input":{"description":"Call web.search(q) and return the number of results using count().","inputs":{"q":"x"}}},
+  {"task":"multi_step_subscribe","input":{"description":"Create a subscription with db.create_sub(u), then send mail.send(u, sub.id). Return {sub: subscription id, message: notification id}.","inputs":{"u":"x"}}}
+]
