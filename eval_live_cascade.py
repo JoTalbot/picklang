@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Живой замер каскада моделей на OpenRouter (free tier, $0).
+"""Живой замер каскада моделей через OpenRouter или Groq API.
 
 6 задач: модель пишет программу PICK по описанию. Валидатор строгий:
 программа парсится, проходит check против реестра и ИСПОЛНЯЕТСЯ на моках
@@ -82,9 +82,11 @@ def make_validator(task):
 
 
 def load_model_tiers(raw: str | None = None):
-    """Read optional JSON model tiers from PICK_LIVE_MODEL_TIERS, else use free defaults."""
+    """Read optional JSON model tiers; defaults depend on the selected provider."""
     raw = os.environ.get("PICK_LIVE_MODEL_TIERS") if raw is None else raw
     if not raw:
+        if os.environ.get("PICK_LIVE_PROVIDER", "").lower() == "groq":
+            return [["openai/gpt-oss-20b"], ["openai/gpt-oss-120b"]]
         return [["liquid/lfm-2.5-2.6b:free", "poolside/laguna-xs-2.1:free"],
                 ["nvidia/nemotron-3-super-120b-a12b:free", "google/gemma-4-31b-it:free"]]
     try:
@@ -155,14 +157,15 @@ def main():
     Path("bench/live_cascade_results.json").write_text(
         json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
     if args.write:
-        lines = ["# Живой каскад моделей (OpenRouter, free tier, $0)", "",
+        provider = os.environ.get("PICK_LIVE_PROVIDER", "openrouter").lower()
+        lines = [f"# Живой каскад моделей ({provider})", "",
                  "Валидатор: парсинг + check + исполнение на моках до ожидаемого результата.", "",
                  "| Задача | OK | Tier | Модель | Попыток | Сек | Токены |", "|---|---|---|---|---:|---:|---:|"]
         for r in results:
             lines.append(f"| {r['task']} | {r['ok']} | {r['tier']} | {r['model']} | {r['attempts']} | "
                          f"{r['seconds']} | {r['prompt_tokens']}+{r['completion_tokens']} |")
         lines += ["", f"Итого: {ok}/{len(results)}; дешёвым tier-0 решено {cheap}; всего токенов {total_tok}.",
-                  "Оговорка: free tier нестабилен (429/зависания случались в прошлых прогонах) — "
+                  "Оговорка: доступность моделей и квоты зависят от провайдера и тарифа; "
                   "цифры одного прогона, а не статистика."]
         Path("docs/LIVE_CASCADE.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
         print("docs/LIVE_CASCADE.md обновлён")
