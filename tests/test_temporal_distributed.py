@@ -18,8 +18,22 @@ def test_temporal_worker_in_separate_process():
         [sys.executable, str(root / "tools" / "temporal_distributed.py")],
         capture_output=True, text=True, timeout=240, cwd=root)
     out = proc.stdout + proc.stderr
+    passed = any(line.startswith("PASS:") for line in out.splitlines())
+
+    # The bundled Temporal test server can abort during native shutdown on
+    # ARM64 after the workflow itself has passed. Retry only this teardown-only
+    # signature; a missing PASS or ordinary nonzero exit must fail immediately.
+    if proc.returncode < 0 and passed:
+        retry = subprocess.run(
+            [sys.executable, str(root / "tools" / "temporal_distributed.py")],
+            capture_output=True, text=True, timeout=240, cwd=root)
+        retry_out = retry.stdout + retry.stderr
+        assert retry.returncode == 0, retry_out[-1500:]
+        assert any(line.startswith("PASS:") for line in retry_out.splitlines()), retry_out[-1500:]
+        return
+
     assert proc.returncode == 0, out[-1000:]
-    assert any(line.startswith("PASS:") for line in out.splitlines()), out[-1000:]
+    assert passed, out[-1000:]
 
 
 def test_temporal_worker_restart_mid_workflow():
