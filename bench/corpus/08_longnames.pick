@@ -1,0 +1,6 @@
+> process(customer_identifier, payment_amount)
+reservation_result = warehouse.reserve(customer_identifier) ! warehouse.release(customer_identifier)
+payment_result = payments.charge(customer_identifier, payment_amount) ! payments.refund(payment_result.transaction)
+? payment_result.approved -> fail "платёж не одобрен"
+delivery_result = logistics.book(customer_identifier) ! logistics.cancel(delivery_result.tracking)
+out {transaction: payment_result.transaction, tracking: delivery_result.tracking}

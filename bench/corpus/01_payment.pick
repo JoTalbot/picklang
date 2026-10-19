@@ -1,0 +1,7 @@
+> order(id, amt)
+r = stock.reserve(id) ! stock.release(id)
+p = bank.charge(id, amt) ! bank.refund(p.tx)
+? p.ok -> fail "банк отклонил"
+s = post.book(id) ! post.cancel(s.track)
+mail.send(id, s.track)
+out {tx: p.tx, track: s.track}

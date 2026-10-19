@@ -12,6 +12,7 @@ license = { text = "MIT" }
 
 [project.optional-dependencies]
 bench = ["tiktoken>=0.7"]
+temporal = ["temporalio>=1.7"]
 dev = ["pytest>=8"]
 
 [tool.setuptools]

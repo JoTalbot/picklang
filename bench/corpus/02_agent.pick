@@ -1,0 +1,8 @@
+> task(q)
+plan = llm.plan(q)
+found = web.search(plan.query) >> docs.top(3)
+draft = llm.write(q, found)
+@wait approval
+? approval -> fail "отклонил человек"
+sent = mail.send(draft.to, draft.text)
+out {id: sent.id}

@@ -1,0 +1,8 @@
+> release(ver)
+notes = rel.notes(ver)
+ci = ci.run(ver)
+? ci.ok -> fail "CI красный"
+art = build.make(ver) ! build.drop(art.id)
+sum = sign.sha(art)
+rel.publish(ver, notes, sum)
+out {ver: ver, sha: sum}

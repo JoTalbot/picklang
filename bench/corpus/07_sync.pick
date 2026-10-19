@@ -1,0 +1,6 @@
+> sync(src)
+items = src.list() >> io.batch(100)
+ok = db.upsert(items) ! db.rollback(ok.batch)
+? ok.n -> fail "ничего не записано"
+idx = search.reindex(ok.batch)
+out {n: ok.n, batch: ok.batch}

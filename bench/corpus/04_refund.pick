@@ -1,0 +1,7 @@
+> refund(order_id, reason)
+o = db.order(order_id)
+? o.paid -> fail "заказ не оплачен"
+r = bank.refund(o.tx) ! bank.refund_undo(r.id)
+db.mark_refunded(order_id, r.id)
+mail.send(o.user, r.id)
+out {refund: r.id}

@@ -1,0 +1,8 @@
+> report(month)
+raw = db.query(month) >> data.clean() >> data.agg()
+chart = viz.chart(raw)
+pdf = doc.render(raw, chart)
+@wait finance_ok
+? finance_ok -> fail "финансы не подтвердили"
+arc = cas.store(pdf)
+out {report: arc, rows: raw.n}

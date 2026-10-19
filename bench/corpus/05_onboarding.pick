@@ -1,0 +1,9 @@
+> onboard(user)
+acc = crm.create(user) ! crm.remove(acc.id)
+docs = kyc.collect(user) >> kyc.verify()
+? docs.ok -> fail "KYC не пройден"
+card = pay.issue(acc.id) ! pay.close(card.id)
+@wait manager_ok
+? manager_ok -> fail "менеджер отклонил"
+crm.activate(acc.id)
+out {acc: acc.id, card: card.id}
