@@ -1,0 +1,394 @@
+[
+ {
+  "task": "charge_tx",
+  "ok": true,
+  "tier": 0,
+  "model": "liquid/lfm-2.5-2.6b:free",
+  "attempts": 1,
+  "seconds": 9.0,
+  "prompt_tokens": 249,
+  "completion_tokens": 2114,
+  "log": [
+   {
+    "tier": 0,
+    "model": "liquid/lfm-2.5-2.6b:free",
+    "ok": true,
+    "usage": {
+     "prompt_tokens": 249,
+     "completion_tokens": 2114,
+     "total_tokens": 2363,
+     "cost": 0,
+     "is_byok": false,
+     "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0,
+      "audio_tokens": 0,
+      "video_tokens": 0
+     },
+     "cost_details": {
+      "upstream_inference_cost": 0,
+      "upstream_inference_prompt_cost": 0,
+      "upstream_inference_completions_cost": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 2098,
+      "image_tokens": 0,
+      "audio_tokens": 0
+     }
+    }
+   }
+  ]
+ },
+ {
+  "task": "search_top1",
+  "ok": true,
+  "tier": 0,
+  "model": "poolside/laguna-xs-2.1:free",
+  "attempts": 2,
+  "seconds": 8.6,
+  "prompt_tokens": 549,
+  "completion_tokens": 1538,
+  "log": [
+   {
+    "tier": 0,
+    "model": "liquid/lfm-2.5-2.6b:free",
+    "ok": false,
+    "usage": {
+     "prompt_tokens": 241,
+     "completion_tokens": 1059,
+     "total_tokens": 1300,
+     "cost": 0,
+     "is_byok": false,
+     "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0,
+      "audio_tokens": 0,
+      "video_tokens": 0
+     },
+     "cost_details": {
+      "upstream_inference_cost": 0,
+      "upstream_inference_prompt_cost": 0,
+      "upstream_inference_completions_cost": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 1043,
+      "image_tokens": 0,
+      "audio_tokens": 0
+     }
+    }
+   },
+   {
+    "tier": 0,
+    "model": "poolside/laguna-xs-2.1:free",
+    "ok": true,
+    "usage": {
+     "prompt_tokens": 308,
+     "completion_tokens": 479,
+     "total_tokens": 787,
+     "cost": 0,
+     "is_byok": false,
+     "prompt_tokens_details": {
+      "cached_tokens": 32,
+      "cache_write_tokens": 0,
+      "audio_tokens": 0,
+      "video_tokens": 0
+     },
+     "cost_details": {
+      "upstream_inference_cost": 0,
+      "upstream_inference_prompt_cost": 0,
+      "upstream_inference_completions_cost": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 459,
+      "image_tokens": 0,
+      "audio_tokens": 0
+     }
+    }
+   }
+  ]
+ },
+ {
+  "task": "double_last",
+  "ok": true,
+  "tier": 1,
+  "model": "nvidia/nemotron-3-super-120b-a12b:free",
+  "attempts": 3,
+  "seconds": 38.9,
+  "prompt_tokens": 512,
+  "completion_tokens": 3351,
+  "log": [
+   {
+    "tier": 0,
+    "model": "liquid/lfm-2.5-2.6b:free",
+    "ok": false,
+    "usage": {
+     "prompt_tokens": 259,
+     "completion_tokens": 2355,
+     "total_tokens": 2614,
+     "cost": 0,
+     "is_byok": false,
+     "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0,
+      "audio_tokens": 0,
+      "video_tokens": 0
+     },
+     "cost_details": {
+      "upstream_inference_cost": 0,
+      "upstream_inference_prompt_cost": 0,
+      "upstream_inference_completions_cost": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 2334,
+      "image_tokens": 0,
+      "audio_tokens": 0
+     }
+    }
+   },
+   {
+    "tier": 0,
+    "model": "poolside/laguna-xs-2.1:free",
+    "ok": false,
+    "error": "poolside/laguna-xs-2.1:free: HTTPError: HTTP Error 429: Too Many Requests"
+   },
+   {
+    "tier": 1,
+    "model": "nvidia/nemotron-3-super-120b-a12b:free",
+    "ok": true,
+    "usage": {
+     "prompt_tokens": 253,
+     "completion_tokens": 996,
+     "total_tokens": 1249,
+     "cost": 0,
+     "is_byok": false,
+     "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0,
+      "audio_tokens": 0,
+      "video_tokens": 0
+     },
+     "cost_details": {
+      "upstream_inference_cost": 0,
+      "upstream_inference_prompt_cost": 0,
+      "upstream_inference_completions_cost": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 975,
+      "image_tokens": 0,
+      "audio_tokens": 0
+     }
+    }
+   }
+  ]
+ },
+ {
+  "task": "fields_a",
+  "ok": true,
+  "tier": 1,
+  "model": "nvidia/nemotron-3-super-120b-a12b:free",
+  "attempts": 3,
+  "seconds": 33.9,
+  "prompt_tokens": 803,
+  "completion_tokens": 2516,
+  "log": [
+   {
+    "tier": 0,
+    "model": "liquid/lfm-2.5-2.6b:free",
+    "ok": false,
+    "usage": {
+     "prompt_tokens": 245,
+     "completion_tokens": 2162,
+     "total_tokens": 2407,
+     "cost": 0,
+     "is_byok": false,
+     "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0,
+      "audio_tokens": 0,
+      "video_tokens": 0
+     },
+     "cost_details": {
+      "upstream_inference_cost": 0,
+      "upstream_inference_prompt_cost": 0,
+      "upstream_inference_completions_cost": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 2146,
+      "image_tokens": 0,
+      "audio_tokens": 0
+     }
+    }
+   },
+   {
+    "tier": 0,
+    "model": "poolside/laguna-xs-2.1:free",
+    "ok": false,
+    "usage": {
+     "prompt_tokens": 316,
+     "completion_tokens": 20,
+     "total_tokens": 336,
+     "cost": 0,
+     "is_byok": false,
+     "prompt_tokens_details": {
+      "cached_tokens": 32,
+      "cache_write_tokens": 0,
+      "audio_tokens": 0,
+      "video_tokens": 0
+     },
+     "cost_details": {
+      "upstream_inference_cost": 0,
+      "upstream_inference_prompt_cost": 0,
+      "upstream_inference_completions_cost": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 0,
+      "image_tokens": 0,
+      "audio_tokens": 0
+     }
+    }
+   },
+   {
+    "tier": 1,
+    "model": "nvidia/nemotron-3-super-120b-a12b:free",
+    "ok": true,
+    "usage": {
+     "prompt_tokens": 242,
+     "completion_tokens": 334,
+     "total_tokens": 576,
+     "cost": 0,
+     "is_byok": false,
+     "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0,
+      "audio_tokens": 0,
+      "video_tokens": 0
+     },
+     "cost_details": {
+      "upstream_inference_cost": 0,
+      "upstream_inference_prompt_cost": 0,
+      "upstream_inference_completions_cost": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 314,
+      "image_tokens": 0,
+      "audio_tokens": 0
+     }
+    }
+   }
+  ]
+ },
+ {
+  "task": "count_results",
+  "ok": true,
+  "tier": 0,
+  "model": "liquid/lfm-2.5-2.6b:free",
+  "attempts": 1,
+  "seconds": 14.5,
+  "prompt_tokens": 241,
+  "completion_tokens": 3501,
+  "log": [
+   {
+    "tier": 0,
+    "model": "liquid/lfm-2.5-2.6b:free",
+    "ok": true,
+    "usage": {
+     "prompt_tokens": 241,
+     "completion_tokens": 3501,
+     "total_tokens": 3742,
+     "cost": 0,
+     "is_byok": false,
+     "prompt_tokens_details": {
+      "cached_tokens": 192,
+      "cache_write_tokens": 0,
+      "audio_tokens": 0,
+      "video_tokens": 0
+     },
+     "cost_details": {
+      "upstream_inference_cost": 0,
+      "upstream_inference_prompt_cost": 0,
+      "upstream_inference_completions_cost": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 3487,
+      "image_tokens": 0,
+      "audio_tokens": 0
+     }
+    }
+   }
+  ]
+ },
+ {
+  "task": "guard_charge",
+  "ok": true,
+  "tier": 1,
+  "model": "nvidia/nemotron-3-super-120b-a12b:free",
+  "attempts": 3,
+  "seconds": 422.9,
+  "prompt_tokens": 723,
+  "completion_tokens": 5500,
+  "log": [
+   {
+    "tier": 0,
+    "model": "liquid/lfm-2.5-2.6b:free",
+    "ok": false,
+    "usage": {
+     "prompt_tokens": 366,
+     "completion_tokens": 5085,
+     "total_tokens": 5451,
+     "cost": 0,
+     "is_byok": false,
+     "prompt_tokens_details": {
+      "cached_tokens": 192,
+      "cache_write_tokens": 0,
+      "audio_tokens": 0,
+      "video_tokens": 0
+     },
+     "cost_details": {
+      "upstream_inference_cost": 0,
+      "upstream_inference_prompt_cost": 0,
+      "upstream_inference_completions_cost": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 5059,
+      "image_tokens": 0,
+      "audio_tokens": 0
+     }
+    }
+   },
+   {
+    "tier": 0,
+    "model": "poolside/laguna-xs-2.1:free",
+    "ok": false,
+    "error": "poolside/laguna-xs-2.1:free: TimeoutError: The read operation timed out"
+   },
+   {
+    "tier": 1,
+    "model": "nvidia/nemotron-3-super-120b-a12b:free",
+    "ok": true,
+    "usage": {
+     "prompt_tokens": 357,
+     "completion_tokens": 415,
+     "total_tokens": 772,
+     "cost": 0,
+     "is_byok": false,
+     "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0,
+      "audio_tokens": 0,
+      "video_tokens": 0
+     },
+     "cost_details": {
+      "upstream_inference_cost": 0,
+      "upstream_inference_prompt_cost": 0,
+      "upstream_inference_completions_cost": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 395,
+      "image_tokens": 0,
+      "audio_tokens": 0
+     }
+    }
+   }
+  ]
+ }
+]
