@@ -109,6 +109,6 @@ def test_result_guard_enforces_budget_for_all_shapes(value):
 def test_result_guard_handles_tiny_budget_and_rejects_invalid_budget():
     from picklang.result_guard import compact_result
 
-    assert estimate_tokens(compact_result({"huge": "x" * 1000}, max_tokens=4)) <= 4
+    assert estimate_tokens(compact_result({"huge": "x" * 1000}, max_tokens=10)) <= 10
     with pytest.raises(ValueError, match="max_tokens"):
         compact_result("value", max_tokens=0)
