@@ -21,3 +21,14 @@ def test_temporal_worker_in_separate_process():
     if "SKIP" in out:
         pytest.skip(out.strip().splitlines()[-1] if out.strip() else "недоступно")
     assert "PASS" in out, out[-500:]
+
+
+def test_temporal_worker_restart_mid_workflow(tmp_path=None):
+    root = Path(__file__).parent.parent
+    proc = subprocess.run(
+        [sys.executable, str(root / "tools" / "temporal_restart.py")],
+        capture_output=True, text=True, timeout=240, cwd=root)
+    out = proc.stdout + proc.stderr
+    if "SKIP" in out:
+        pytest.skip(out.strip().splitlines()[-1] if out.strip() else "недоступно")
+    assert "PASS" in out, out[-500:]

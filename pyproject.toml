@@ -3,20 +3,27 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pick-durable-weave"
+name = "picklang"
 version = "0.1.0"
-description = "PICK — компактный язык для LLM (экономия токенов 2-3x) + durable-исполнитель с CAS-доказуемостью"
+description = "PICK — компактный язык намерений для LLM-агентов + durable-исполнитель с replay, CAS и хэш-цепочкой (DurableWeave)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
+authors = [{ name = "JoTalbot" }]
+keywords = ["llm", "agents", "durable-execution", "workflow", "temporal", "token-efficiency"]
+dependencies = []
+
+[project.optional-dependencies]
+tokens = ["tiktoken"]
+temporal = ["temporalio"]
+mcp = ["mcp"]
+dev = ["pytest", "tiktoken", "temporalio"]
 
 [project.scripts]
 pick = "picklang.cli:main"
 
-[project.optional-dependencies]
-bench = ["tiktoken>=0.7"]
-temporal = ["temporalio>=1.7"]
-dev = ["pytest>=8"]
+[tool.setuptools.packages.find]
+include = ["picklang*", "durable_weave*"]
 
-[tool.setuptools]
-packages = ["picklang", "durable_weave"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]

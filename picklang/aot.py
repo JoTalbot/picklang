@@ -211,7 +211,9 @@ def generate_python(source: str) -> str:
         # сага: при бизнес-ошибке компенсации в обратном порядке, затем проброс
         wrapped = header + ["    try:"]
         wrapped += ["    " + ln if ln.strip() else ln for ln in lines]
-        wrapped += ["    except Exception as _e:",
+        wrapped += ["    except WaitingSignal:",
+                    "        raise  # ожидание — не бизнес-ошибка: компенсации не запускаем",
+                    "    except Exception as _e:",
                     "        for _comp in reversed(_compensations):",
                     "            _comp()",
                     "        raise RuntimeError(str(_e) + f'; компенсаций выполнено: {len(_compensations)}') from _e"]

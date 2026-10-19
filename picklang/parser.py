@@ -46,20 +46,25 @@ class Step:
 
 # Выражение кодируем простыми кортежами — IR должен быть JSON-сериализуемым:
 # ("call", "bank.charge", [args]) | ("var", "x") | ("lit", value) | ("pipe", [exprs])
-def _parse_expr(text: str, line: int, raw: str):
+MAX_EXPR_DEPTH = 40  # глубже — почти наверняка мусор/атака, а не программа
+
+
+def _parse_expr(text: str, line: int, raw: str, depth: int = 0):
+    if depth > MAX_EXPR_DEPTH:
+        raise PickSyntaxError(line, raw, f"выражение вложено глубже {MAX_EXPR_DEPTH}")
     text = text.strip()
     if not text:
         raise PickSyntaxError(line, raw, "пустое выражение")
     cmp_op = _find_cmp(text)
     if cmp_op:
         op, idx = cmp_op
-        return ("cmp", op, _parse_expr(text[:idx], line, raw), _parse_expr(text[idx + len(op):], line, raw))
+        return ("cmp", op, _parse_expr(text[:idx], line, raw, depth + 1), _parse_expr(text[idx + len(op):], line, raw, depth + 1))
     if ">>" in text:
-        return ("pipe", [_parse_expr(part, line, raw) for part in _split_top(text, ">>")])
+        return ("pipe", [_parse_expr(part, line, raw, depth + 1) for part in _split_top(text, ">>")])
     m = re.fullmatch(r"([A-Za-z_][\w.]*)\((.*)\)", text, re.S)
     if m:
         args_text = m.group(2).strip()
-        args = [_parse_expr(a, line, raw) for a in _split_top(args_text, ",")] if args_text else []
+        args = [_parse_expr(a, line, raw, depth + 1) for a in _split_top(args_text, ",")] if args_text else []
         return ("call", m.group(1), args)
     if re.fullmatch(r"[A-Za-z_]\w*", text):
         return ("var", text)
@@ -71,7 +76,7 @@ def _parse_expr(text: str, line: int, raw: str):
         if inner:
             for part in _split_top(inner, ","):
                 key, _, val = part.partition(":")
-                items.append((key.strip().strip("\"'"), _parse_expr(val, line, raw)))
+                items.append((key.strip().strip("\"'"), _parse_expr(val, line, raw, depth + 1)))
         return ("map", items)
     try:  # литералы: числа, строки, списки, true/false/null -> True/False/None как данные
         value = py_ast.literal_eval(text)
