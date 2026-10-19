@@ -1,3 +1,16 @@
+# picklang 0.1.1
+
+Patch release.
+
+- Preserve the CAS reference when a strict result budget forces the preview to be dropped, so callers can still recover the complete result.
+- Add live-cascade configuration and multi-step validator regression tests.
+- Run pull-request tests and package builds on GitHub-hosted runners; retain the main-only self-hosted and live-provider checks.
+- Correct benchmark documentation to distinguish source-token counts from end-to-end agent cost.
+
+Release gate: the main-branch workflow publishes this version only after unit/package checks and the six-task Groq live cascade both pass. The live evaluation consumes provider quota.
+
+---
+
 # picklang 0.1.0
 
 Первый упакованный релиз: язык PICK для намерений LLM-агентов и durable-исполнитель DurableWeave.
