@@ -239,6 +239,14 @@ class DurableExecutor:
 
     # --- верификация: то, чего у классического durable-исполнителя нет ----
     def verify(self, execution_id: str) -> dict[str, Any]:
+        db_path = self.workdir / "executions" / execution_id / "events.db"
+        if not db_path.exists():
+            # Иначе опечатка в id даёт «verified: true» на пустой цепочке и создаёт
+            # пустую директорию исполнения как побочный эффект проверки.
+            return {"execution_id": execution_id, "status": "MISSING",
+                    "chain_ok": False, "chain_detail": "execution not found",
+                    "artifacts_ok": False, "bad_artifacts": [],
+                    "events": 0, "digest": "", "cas": self.cas.stats(), "verified": False}
         self._load(execution_id)
         assert self.log is not None
         ok, detail = self.log.verify_chain()
@@ -258,5 +266,6 @@ class DurableExecutor:
             "chain_ok": ok, "chain_detail": detail,
             "artifacts_ok": artifacts_ok, "bad_artifacts": bad,
             "events": len(self.log.events), "digest": self.log.last_hash,
-            "cas": self.cas.stats(), "verified": bool(ok and artifacts_ok),
+            "cas": self.cas.stats(),
+            "verified": bool(ok and artifacts_ok and self.log.events),
         }
