@@ -1,0 +1,8 @@
+# сага оплаты: резерв -> платёж -> доставка, компенсации в обратном порядке
+> order(id, amt)
+r = stock.reserve(id) ! stock.release(id)
+p = bank.charge(id, amt) ! bank.refund(p.tx)
+? p.ok -> fail "банк отклонил платёж"
+s = post.book(id) ! post.cancel(s.track)
+mail.send(id, s.track)
+out {order: id, tx: p.tx, track: s.track}

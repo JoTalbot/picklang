@@ -1,0 +1,3 @@
+@base payment.pick
+~4: ? p.ok -> fail "банк отклонил платёж (код проверен)"
++5: log.event("delivery_booked", s.track)

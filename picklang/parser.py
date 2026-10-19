@@ -1,0 +1,144 @@
+"""Парсер PICK v0.1: построчный, без отступов-блоков, одна строка = один шаг.
+
+Грамматика (полностью — в docs/LANGUAGE.md):
+  > name(a, b)              вход/цель программы и её параметры
+  x = expr                  привязка
+  x = call ! undo_call      шаг саги: при позднейшем сбое выполнить undo (LIFO)
+  ? expr -> fail "текст"    страж: условие ложно -> контролируемый отказ
+  @wait signal              ждать внешний сигнал (человек/система)
+  out expr                  результат программы
+  expr                      выражение-шаг (обычно вызов)
+Выражения: вызовы mod.fn(...), переменные, литералы, пайплайн a >> b >> c.
+"""
+from __future__ import annotations
+
+import ast as py_ast
+import re
+from dataclasses import dataclass, field
+from typing import Any
+
+
+class PickSyntaxError(Exception):
+    def __init__(self, line: int, text: str, hint: str):
+        super().__init__(f"line {line}: {hint} :: {text.strip()}")
+        self.line, self.text, self.hint = line, text, hint
+
+
+@dataclass
+class Step:
+    kind: str                      # goal|assign|expr|guard|wait|out
+    line: int
+    target: str | None = None      # переменная слева от =
+    expr: Any = None               # выражение (см. _parse_expr)
+    compensation: Any = None       # выражение-компенсация после !
+    signal: str | None = None
+    name: str | None = None        # имя цели / сигнала
+    params: list[str] = field(default_factory=list)
+
+
+# Выражение кодируем простыми кортежами — IR должен быть JSON-сериализуемым:
+# ("call", "bank.charge", [args]) | ("var", "x") | ("lit", value) | ("pipe", [exprs])
+def _parse_expr(text: str, line: int, raw: str):
+    text = text.strip()
+    if not text:
+        raise PickSyntaxError(line, raw, "пустое выражение")
+    if ">>" in text:
+        return ("pipe", [_parse_expr(part, line, raw) for part in _split_top(text, ">>")])
+    m = re.fullmatch(r"([A-Za-z_][\w.]*)\((.*)\)", text, re.S)
+    if m:
+        args_text = m.group(2).strip()
+        args = [_parse_expr(a, line, raw) for a in _split_top(args_text, ",")] if args_text else []
+        return ("call", m.group(1), args)
+    if re.fullmatch(r"[A-Za-z_]\w*", text):
+        return ("var", text)
+    if re.fullmatch(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)+", text):
+        return ("get", text)  # p.tx, draft.to — доступ к полю результата
+    if text.startswith("{") and text.endswith("}"):
+        inner = text[1:-1].strip()
+        items = []
+        if inner:
+            for part in _split_top(inner, ","):
+                key, _, val = part.partition(":")
+                items.append((key.strip().strip("\"'"), _parse_expr(val, line, raw)))
+        return ("map", items)
+    try:  # литералы: числа, строки, списки, true/false/null -> True/False/None как данные
+        value = py_ast.literal_eval(text)
+        return ("lit", value)
+    except Exception:
+        raise PickSyntaxError(line, raw, f"не понимаю выражение '{text}': ожидается вызов, переменная или литерал")
+
+
+def _split_top(text: str, sep: str) -> list[str]:
+    parts, depth, quote, cur = [], 0, None, ""
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            cur += ch
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in "\"'":
+            quote = ch; cur += ch; i += 1; continue
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if depth == 0 and text.startswith(sep, i):
+            parts.append(cur); cur = ""; i += len(sep); continue
+        cur += ch; i += 1
+    parts.append(cur)
+    return [p.strip() for p in parts if p.strip() != ""]
+
+
+def parse(source: str) -> list[Step]:
+    steps: list[Step] = []
+    for lineno, raw in enumerate(source.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith(">"):
+            m = re.fullmatch(r">\s*([A-Za-z_]\w*)\(([^)]*)\)", line)
+            if not m:
+                raise PickSyntaxError(lineno, raw, "цель записывается как: > name(param1, param2)")
+            params = [p.strip() for p in m.group(2).split(",") if p.strip()]
+            steps.append(Step("goal", lineno, name=m.group(1), params=params))
+            continue
+        if line.startswith("@wait"):
+            name = line[5:].strip()
+            if not re.fullmatch(r"[A-Za-z_]\w*", name):
+                raise PickSyntaxError(lineno, raw, "после @wait нужно имя сигнала: @wait approval")
+            steps.append(Step("wait", lineno, signal=name))
+            continue
+        if line.startswith("?"):
+            m = re.fullmatch(r"\?\s*(.+?)\s*->\s*fail\s+(.+)", line)
+            if not m:
+                raise PickSyntaxError(lineno, raw, 'страж записывается как: ? условие -> fail "причина"')
+            steps.append(Step("guard", lineno, expr=_parse_expr(m.group(1), lineno, raw),
+                              target=_parse_expr(m.group(2), lineno, raw)))
+            continue
+        if line.startswith("out "):
+            steps.append(Step("out", lineno, expr=_parse_expr(line[4:], lineno, raw)))
+            continue
+        if "=" in line and not line.startswith("="):
+            lhs, rhs = line.split("=", 1)
+            target = lhs.strip()
+            if not re.fullmatch(r"[A-Za-z_]\w*", target):
+                raise PickSyntaxError(lineno, raw, "слева от = должно быть одно имя переменной")
+            comp = None
+            if " ! " in rhs:
+                rhs, comp_text = rhs.split(" ! ", 1)
+                comp = _parse_expr(comp_text, lineno, raw)
+            steps.append(Step("assign", lineno, target=target,
+                              expr=_parse_expr(rhs, lineno, raw), compensation=comp))
+            continue
+        # выражение-шаг, возможно с компенсацией: call ! undo_call
+        comp = None
+        if " ! " in line:
+            line, comp_text = line.split(" ! ", 1)
+            comp = _parse_expr(comp_text, lineno, raw)
+        steps.append(Step("expr", lineno, expr=_parse_expr(line, lineno, raw), compensation=comp))
+    if not steps:
+        raise PickSyntaxError(0, "", "пустая программа")
+    return steps

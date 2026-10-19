@@ -1,0 +1,21 @@
+{
+  "name": "order",
+  "version": "1",
+  "inputs": ["id", "amt"],
+  "steps": [
+    {"id": "reserve", "activity": "stock.reserve", "args": ["${id}"],
+     "compensation": {"activity": "stock.release", "args": ["${id}"]},
+     "result": "r"},
+    {"id": "charge", "activity": "bank.charge", "args": ["${id}", "${amt}"],
+     "compensation": {"activity": "bank.refund", "args": ["${p.tx}"]},
+     "result": "p"},
+    {"id": "check_payment", "type": "guard", "condition": "${p.ok}",
+     "on_false": {"action": "fail", "reason": "банк отклонил платёж"}},
+    {"id": "book_delivery", "activity": "post.book", "args": ["${id}"],
+     "compensation": {"activity": "post.cancel", "args": ["${s.track}"]},
+     "result": "s"},
+    {"id": "notify", "activity": "mail.send", "args": ["${id}", "${s.track}"]},
+    {"id": "result", "type": "output",
+     "value": {"order": "${id}", "tx": "${p.tx}", "track": "${s.track}"}}
+  ]
+}

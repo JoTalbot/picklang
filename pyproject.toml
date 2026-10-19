@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pick-durable-weave"
+version = "0.1.0"
+description = "PICK — компактный язык для LLM (экономия токенов 2-3x) + durable-исполнитель с CAS-доказуемостью"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[project.optional-dependencies]
+bench = ["tiktoken>=0.7"]
+dev = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["picklang", "durable_weave"]
