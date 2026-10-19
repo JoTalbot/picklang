@@ -81,7 +81,7 @@ jobs:
       github.repository == 'JoTalbot/testing' &&
       github.ref == 'refs/heads/main' &&
       needs.tests.result == 'success' &&
-      github.event_name == 'workflow_dispatch' && inputs.run_live
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_live))
     runs-on: [self-hosted, linux, arm64]
     timeout-minutes: 25
     env:
