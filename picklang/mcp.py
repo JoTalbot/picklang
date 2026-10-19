@@ -8,7 +8,9 @@ initialize -> tools/list -> tools/call. Инструменты сервера р
 from __future__ import annotations
 
 import json
+import queue
 import subprocess
+import threading
 from typing import Any, Callable
 
 
@@ -17,12 +19,35 @@ class McpError(Exception):
 
 
 class McpClient:
-    def __init__(self, command: list[str], name: str = "mcp"):
+    def __init__(self, command: list[str], name: str = "mcp", timeout: float | None = 30.0):
         self.name = name
+        self.timeout = timeout
         self.proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      text=True, encoding="utf-8")
         self._id = 0
         self.tools: list[dict[str, Any]] = []
+        # Читаем stdout в отдельном потоке: readline() без таймаута вешает клиента
+        # навсегда, если сервер принял соединение и молчит.
+        self._lines: queue.Queue[str | None] = queue.Queue()
+        self._reader = threading.Thread(target=self._read_loop, daemon=True)
+        self._reader.start()
+
+    def _read_loop(self) -> None:
+        assert self.proc.stdout is not None
+        for line in self.proc.stdout:
+            self._lines.put(line)
+        self._lines.put(None)  # EOF: сервер закрылся
+
+    def _read_response(self, method: str) -> str:
+        try:
+            line = self._lines.get(timeout=self.timeout) if self.timeout else self._lines.get()
+        except queue.Empty as exc:
+            raise McpError(
+                f"MCP-сервер {self.name} не ответил на {method} за {self.timeout:g} с"
+            ) from exc
+        if line is None:
+            raise McpError(f"MCP-сервер {self.name} закрылся, не ответив на {method}")
+        return line
 
     def _send(self, method: str, params: dict | None = None, notify: bool = False) -> Any:
         self._id += 1
@@ -36,11 +61,7 @@ class McpClient:
         self.proc.stdin.flush()
         if notify:
             return None
-        assert self.proc.stdout is not None
-        line = self.proc.stdout.readline()
-        if not line:
-            raise McpError(f"MCP-сервер {self.name} закрылся, не ответив на {method}")
-        resp = json.loads(line)
+        resp = json.loads(self._read_response(method))
         if "error" in resp:
             raise McpError(f"{method}: {resp['error']}")
         return resp.get("result")
@@ -68,8 +89,10 @@ class McpClient:
     def close(self) -> None:
         try:
             self.proc.terminate()
+            self.proc.wait(timeout=5)
         except Exception:
             pass
+        self._reader.join(timeout=2)
 
 
 def registry_from_mcp(client: McpClient) -> dict[str, Callable]:
