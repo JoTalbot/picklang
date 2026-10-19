@@ -67,3 +67,29 @@ def test_load_tasks_rejects_duplicate_names(tmp_path):
     ]), encoding="utf-8")
     with pytest.raises(ValueError, match="duplicate"):
         load_tasks(path)
+
+
+
+def test_provider_rate_limit_stops_all_remaining_calls(tmp_path):
+    marker = tmp_path / "baseline-called"
+    rate_limited = adapter(
+        "import json; print(json.dumps({'ok': False, 'error': 'provider rate limit HTTP 429'}))"
+    )
+    baseline = adapter(
+        "from pathlib import Path; import json,sys; "
+        + "Path(" + repr(str(marker)) + ").write_text('called'); "
+        + "print(json.dumps({'ok': True}))"
+    )
+    tasks = [
+        {"task": "one", "input": {"value": 1}},
+        {"task": "two", "input": {"value": 2}},
+    ]
+    report = run_pair(tasks, rate_limited, baseline, repeats=2)
+
+    assert report["status"] == "INCONCLUSIVE_RATE_LIMIT"
+    assert report["rate_limit_detected"] is True
+    assert len(report["pick"]) == len(report["baseline"]) == 4
+    assert "429" in report["pick"][0]["error"]
+    assert report["baseline"][0]["skipped"] is True
+    assert all(row.get("skipped") for row in report["pick"][1:] + report["baseline"][1:])
+    assert not marker.exists()
