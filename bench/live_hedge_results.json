@@ -1,0 +1,62 @@
+[
+ {
+  "mode": "sequential",
+  "task": "charge_tx",
+  "ok": true,
+  "model": "poolside/laguna-xs-2.1:free",
+  "tier": 0,
+  "attempts": 2,
+  "tokens": 1949,
+  "seconds": 17.2
+ },
+ {
+  "mode": "sequential",
+  "task": "double_last",
+  "ok": true,
+  "model": "nvidia/nemotron-3-super-120b-a12b:free",
+  "tier": 1,
+  "attempts": 3,
+  "tokens": 2067,
+  "seconds": 13.9
+ },
+ {
+  "mode": "sequential",
+  "task": "guard_charge",
+  "ok": true,
+  "model": "nvidia/nemotron-3-super-120b-a12b:free",
+  "tier": 1,
+  "attempts": 3,
+  "tokens": 2278,
+  "seconds": 18.5
+ },
+ {
+  "mode": "hedged",
+  "task": "charge_tx",
+  "ok": true,
+  "model": "nvidia/nemotron-3-super-120b-a12b:free",
+  "tier": 1,
+  "attempts": 3,
+  "tokens": 1699,
+  "seconds": 12.3
+ },
+ {
+  "mode": "hedged",
+  "task": "double_last",
+  "ok": true,
+  "model": "poolside/laguna-xs-2.1:free",
+  "tier": 0,
+  "attempts": 2,
+  "tokens": 1625,
+  "seconds": 6.7
+ },
+ {
+  "mode": "hedged",
+  "task": "guard_charge",
+  "ok": true,
+  "model": "nvidia/nemotron-3-super-120b-a12b:free",
+  "tier": 1,
+  "attempts": 3,
+  "tokens": 2232,
+  "seconds": 22.7
+ }
+]
