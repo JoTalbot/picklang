@@ -17,8 +17,7 @@ SHA-256 в духе WEAVE/Prolepsis (дедупликация, tamper-evidence, 
 pip install pytest tiktoken   # tiktoken — только для бенчмарка токенов
 python3 bench_tokens.py       # сколько токенов экономит PICK: цифры, а не лозунги
 python3 examples/run_demo.py  # сага оплаты: успех, откат; агент с одобрением человека
-python3 -m pytest tests/ -q   # 17 тестов: язык, сага, replay, CAS, словарь, патчи-ошибки,
-#                              статконтроль, генератор, minify, корпус, MCP, Temporal
+python3 -m pytest tests/ -q   # полный набор unit/regression-тестов
 ```
 
 ## Пример: та же программа — 121 токен вместо 350
