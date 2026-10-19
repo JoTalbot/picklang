@@ -112,3 +112,14 @@ def test_result_guard_handles_tiny_budget_and_rejects_invalid_budget():
     assert estimate_tokens(compact_result({"huge": "x" * 1000}, max_tokens=10)) <= 10
     with pytest.raises(ValueError, match="max_tokens"):
         compact_result("value", max_tokens=0)
+
+
+def test_agent_tool_benchmark_reports_precise_fixture_metrics():
+    from bench_agent_tools import RESULTS, projection_metrics
+
+    metrics = projection_metrics(RESULTS)
+    assert metrics["raw_tokens"] > metrics["projected_tokens"] > 0
+    assert metrics["ratio"] == pytest.approx(
+        metrics["raw_tokens"] / metrics["projected_tokens"]
+    )
+    assert 0 < metrics["saved_percent"] < 100
