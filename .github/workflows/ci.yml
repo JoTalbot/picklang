@@ -171,19 +171,33 @@ jobs:
           import json
           from pathlib import Path
           report = json.loads(Path("bench/live_paired_ab.json").read_text(encoding="utf-8"))
+          def tokens(row):
+              return (row.get("prompt_tokens", 0) or 0) + (row.get("completion_tokens", 0) or 0)
+
           print("PAIRED LIVE A/B RESULTS")
-          print("| Task | PICK | Classic Python | PICK tokens | Classic tokens |")
-          print("|---|---|---|---:|---:|")
+          print("| Task | PICK | PICK model | PICK tries | PICK sec | PICK tok | Classic | Classic model | Classic tries | Classic sec | Classic tok |")
+          print("|---|---|---|---:|---:|---:|---|---|---:|---:|---:|")
           for p, b in zip(report["pick"], report["baseline"]):
-              pt = (p.get("prompt_tokens", 0) or 0) + (p.get("completion_tokens", 0) or 0)
-              bt = (b.get("prompt_tokens", 0) or 0) + (b.get("completion_tokens", 0) or 0)
-              print(f"| {p['task']} | {'PASS' if p['ok'] else 'FAIL'} | {'PASS' if b['ok'] else 'FAIL'} | {pt} | {bt} |")
+              print(
+                  f"| {p['task']} | {'PASS' if p['ok'] else 'FAIL'} | {p.get('model', '-')} "
+                  f"| {p.get('attempts', '-')} | {p.get('seconds', 0):.2f} | {tokens(p)} "
+                  f"| {'PASS' if b['ok'] else 'FAIL'} | {b.get('model', '-')} "
+                  f"| {b.get('attempts', '-')} | {b.get('seconds', 0):.2f} | {tokens(b)} |"
+              )
           for label, rows in (("PICK", report["pick"]), ("Classic Python", report["baseline"])):
               passed = sum(bool(row["ok"]) for row in rows)
-              tokens = sum((row.get("prompt_tokens", 0) or 0) + (row.get("completion_tokens", 0) or 0) for row in rows)
+              total_tokens = sum(tokens(row) for row in rows)
               seconds = sum(row.get("seconds", 0) or 0 for row in rows)
-              print(f"{label}: {passed}/{len(rows)} passed; {tokens} reported tokens; summed invocation time {seconds:.2f}s")
-          print("Caveat: provider/model attempts can differ by validation failures; inspect raw report before drawing conclusions.")
+              print(f"{label}: {passed}/{len(rows)} passed; {total_tokens} reported tokens; summed invocation time {seconds:.2f}s")
+          matched = [(p, b) for p, b in zip(report["pick"], report["baseline"]) if p["ok"] and b["ok"]]
+          print(f"MATCHED SUCCESS ONLY: {len(matched)}/{len(report['tasks'])} tasks succeeded in both adapters")
+          if matched:
+              for label, index in (("PICK", 0), ("Classic Python", 1)):
+                  rows = [pair[index] for pair in matched]
+                  print(f"{label} matched-only: {sum(tokens(row) for row in rows)} reported tokens; "
+                        f"{sum(row.get('seconds', 0) or 0 for row in rows):.2f}s summed invocation time")
+          print("Caveat: one run is directional only. Compare matched-success metrics separately from pass rate; models, retries, and provider errors can differ.")
+
           PY
           echo "========== RAW PAIRED A/B REPORT =========="
           cat bench/live_paired_ab.json
