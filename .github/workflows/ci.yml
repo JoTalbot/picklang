@@ -12,6 +12,20 @@ on:
         required: false
         default: true
         type: boolean
+      paired_repeats:
+        description: "Repeat count for same-model paired A/B benchmark (manual runs only)"
+        required: false
+        default: "3"
+        type: choice
+        options: ["1", "3", "5"]
+      paired_model:
+        description: "Single model used identically by both A/B adapters"
+        required: false
+        default: "openai/gpt-oss-20b"
+        type: choice
+        options:
+          - openai/gpt-oss-20b
+          - openai/gpt-oss-120b
 
 permissions:
   contents: read
@@ -160,26 +174,40 @@ jobs:
           # The preceding live cascade can consume nearly a full provider TPM window.
           # Let the provider's rolling rate-limit window reset before the paired run.
           sleep 65
+          # A/B comparisons use one identical model with no fallback so model tier
+          # differences cannot masquerade as language/runtime improvements. Manual runs
+          # may repeat the paired tasks; push-triggered runs stay at one repeat to limit API spend.
+          paired_model="openai/gpt-oss-20b"
+          repeats="1"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            paired_model="${{ inputs.paired_model || 'openai/gpt-oss-20b' }}"
+            repeats="${{ inputs.paired_repeats || '3' }}"
+          fi
+          export PICK_LIVE_MODEL_TIERS="[[$paired_model]]"
+          echo "Paired A/B model: $paired_model"
+          echo "Paired A/B repeats: $repeats"
           python bench_pair.py \
             --tasks bench/live_paired_tasks.json \
             --pick-command "env PICK_AB_MODE=pick python bench_live_adapters.py" \
             --baseline-command "env PICK_AB_MODE=classic python bench_live_adapters.py" \
             --timeout 100 \
-            --repeats 1 \
+            --repeats "$repeats" \
             --write bench/live_paired_ab.json
           python - <<'PY'
           import json
+          import statistics
           from pathlib import Path
           report = json.loads(Path("bench/live_paired_ab.json").read_text(encoding="utf-8"))
           def tokens(row):
               return (row.get("prompt_tokens", 0) or 0) + (row.get("completion_tokens", 0) or 0)
 
           print("PAIRED LIVE A/B RESULTS")
-          print("| Task | PICK | PICK model | PICK tries | PICK sec | PICK tok | Classic | Classic model | Classic tries | Classic sec | Classic tok |")
-          print("|---|---|---|---:|---:|---:|---|---|---:|---:|---:|")
+          print(f"Model: {report['pick'][0].get('model', 'not reported') if report['pick'] else 'no rows'}; repeats: {report['repeats']}")
+          print("| Repeat | Task | PICK | PICK model | PICK tries | PICK sec | PICK tok | Classic | Classic model | Classic tries | Classic sec | Classic tok |")
+          print("|---:|---|---|---|---:|---:|---:|---|---|---:|---:|---:|")
           for p, b in zip(report["pick"], report["baseline"]):
               print(
-                  f"| {p['task']} | {'PASS' if p['ok'] else 'FAIL'} | {p.get('model', '-')} "
+                  f"| {p.get('repeat', '-')} | {p['task']} | {'PASS' if p['ok'] else 'FAIL'} | {p.get('model', '-')} "
                   f"| {p.get('attempts', '-')} | {p.get('seconds', 0):.2f} | {tokens(p)} "
                   f"| {'PASS' if b['ok'] else 'FAIL'} | {b.get('model', '-')} "
                   f"| {b.get('attempts', '-')} | {b.get('seconds', 0):.2f} | {tokens(b)} |"
@@ -188,15 +216,19 @@ jobs:
               passed = sum(bool(row["ok"]) for row in rows)
               total_tokens = sum(tokens(row) for row in rows)
               seconds = sum(row.get("seconds", 0) or 0 for row in rows)
-              print(f"{label}: {passed}/{len(rows)} passed; {total_tokens} reported tokens; summed invocation time {seconds:.2f}s")
+              successful = [row for row in rows if row["ok"]]
+              median_seconds = statistics.median(row.get("seconds", 0) or 0 for row in successful) if successful else float("nan")
+              median_tokens = statistics.median(tokens(row) for row in successful) if successful else float("nan")
+              print(f"{label}: {passed}/{len(rows)} passed ({passed / len(rows):.1%}); {total_tokens} reported tokens; "
+                    f"{seconds:.2f}s summed invocation time; successful-task median {median_seconds:.2f}s / {median_tokens:.0f} tokens")
           matched = [(p, b) for p, b in zip(report["pick"], report["baseline"]) if p["ok"] and b["ok"]]
-          print(f"MATCHED SUCCESS ONLY: {len(matched)}/{len(report['tasks'])} tasks succeeded in both adapters")
+          print(f"MATCHED SUCCESS ONLY: {len(matched)}/{len(report['tasks']) * report['repeats']} task-runs succeeded in both adapters")
           if matched:
               for label, index in (("PICK", 0), ("Classic Python", 1)):
                   rows = [pair[index] for pair in matched]
                   print(f"{label} matched-only: {sum(tokens(row) for row in rows)} reported tokens; "
                         f"{sum(row.get('seconds', 0) or 0 for row in rows):.2f}s summed invocation time")
-          print("Caveat: one run is directional only. Compare matched-success metrics separately from pass rate; models, retries, and provider errors can differ.")
+          print("Caveat: repeated trials reduce noise but do not eliminate provider variability; both adapters receive the same fixture and single configured model. API tokens are usage estimates, not billed-cost measurements.")
 
           PY
           echo "========== RAW PAIRED A/B REPORT =========="
