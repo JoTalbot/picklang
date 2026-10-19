@@ -13,22 +13,28 @@ from .live_agent import LLMError, chat
 
 
 class ModelRouter:
-    def __init__(self, models: list[str], per_model_timeout: int = 60, max_completion_tokens: int | None = None):
+    def __init__(self, models: list[str], per_model_timeout: int = 60, max_completion_tokens: int | None = None,
+                 reasoning_max_tokens: int | None = None):
         self.models = models
         self.timeout = per_model_timeout
         self.max_completion_tokens = max_completion_tokens
+        self.reasoning_max_tokens = reasoning_max_tokens
         self.attempts: list[dict[str, Any]] = []
-        self.total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        self.total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "reasoning_tokens": 0}
 
     def chat(self, key: str, messages: list[dict]) -> tuple[str, str, dict]:
         last_error = None
         for model in self.models:
             try:
-                text, usage = chat(key, model, messages, timeout=self.timeout)
+                text, usage = chat(key, model, messages, timeout=self.timeout,
+                                   max_completion_tokens=self.max_completion_tokens,
+                                   reasoning_max_tokens=self.reasoning_max_tokens)
                 if not text.strip():
                     raise LLMError("пустой ответ")
-                for k in self.total_usage:
+                for k in ("prompt_tokens", "completion_tokens", "total_tokens"):
                     self.total_usage[k] += int(usage.get(k) or 0)
+                self.total_usage["reasoning_tokens"] += int(
+                    (usage.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0)
                 self.attempts.append({"model": model, "ok": True, "usage": usage})
                 return model, text, usage
             except Exception as e:

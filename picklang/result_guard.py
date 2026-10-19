@@ -11,12 +11,22 @@ import json
 from typing import Any, Callable
 
 
-def estimate_tokens(value: Any) -> int:
+from functools import lru_cache
+
+
+@lru_cache(maxsize=1)
+def _encoding():
     try:
         import tiktoken
-        return len(tiktoken.get_encoding("cl100k_base").encode(json.dumps(value, ensure_ascii=False, default=str)))
+        return tiktoken.get_encoding("cl100k_base")
     except Exception:
-        return max(1, len(json.dumps(value, ensure_ascii=False, default=str)) // 4)
+        return None
+
+
+def estimate_tokens(value: Any) -> int:
+    text = json.dumps(value, ensure_ascii=False, default=str)
+    enc = _encoding()
+    return len(enc.encode(text)) if enc is not None else max(1, len(text) // 4)
 
 
 def _shallow(v):

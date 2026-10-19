@@ -51,16 +51,24 @@ PYTHON_SYSTEM = f"""Ты пишешь код. Верни ТОЛЬКО функц
 {FUNCTIONS}"""
 
 
-def try_models(key, messages):
+def try_models(key, messages, json_schema=None):
     errors = []
     for model in DEFAULT_MODELS:
         try:
-            text, usage = chat(key, model, messages, timeout=90)
+            text, usage = chat(key, model, messages, timeout=90, json_schema=json_schema)
             if text.strip():
                 return model, text, usage
             errors.append(f"{model}: пустой ответ")
         except Exception as e:
             errors.append(str(e))
+            if json_schema is not None:
+                # провайдер не умеет constrained decoding — честный откат без схемы
+                try:
+                    text, usage = chat(key, model, messages, timeout=90)
+                    if text.strip():
+                        return model, text, usage
+                except Exception as e2:
+                    errors.append(str(e2))
     raise RuntimeError("все модели недоступны: " + " | ".join(errors))
 
 
@@ -76,9 +84,10 @@ def main():
         DEFAULT_MODELS = [args.model]
 
     # --- A: намерение через Genesis -------------------------------------
+    from picklang.schema import intent_schema
     model_a, intent_text, usage_a = try_models(key, [
         {"role": "system", "content": INTENT_SYSTEM},
-        {"role": "user", "content": TASK}])
+        {"role": "user", "content": TASK}], json_schema=intent_schema())
     intent = extract_json(intent_text)
 
     with tempfile.TemporaryDirectory() as tmp:

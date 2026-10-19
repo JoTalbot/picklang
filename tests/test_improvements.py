@@ -95,7 +95,7 @@ def test_mcp_server_becomes_pick_library():
     client = McpClient([sys.executable, "examples/mcp_server.py"], name="demo")
     try:
         tools = client.connect()
-        assert {t["name"] for t in tools} == {"add", "upper"}
+        assert {t["name"] for t in tools} == {"add", "upper", "search"}
         out, *_ = run_program('> t(x)\ny = demo.add(x, 2)\nout y\n',
                               registry_from_mcp(client), {"x": 40})
         assert out == 42

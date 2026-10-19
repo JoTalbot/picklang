@@ -8,7 +8,12 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"a": {"type": "number"}, "b": {"type": "number"}}}},
     {"name": "upper", "description": "Верхний регистр",
      "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}}},
+    {"name": "search", "description": "Поиск с серверной проекцией",
+     "inputSchema": {"type": "object", "properties": {"query": {"type": "string"},
+                     "limit": {"type": "number"}, "fields": {"type": "string"}}}},
 ]
+
+RESULTS = [{"title": f"r{i}", "url": f"u{i}", "body": "x" * 300} for i in range(10)]
 
 
 def handle(msg):
@@ -20,7 +25,13 @@ def handle(msg):
         return {"tools": TOOLS}
     if method == "tools/call":
         name, args = msg["params"]["name"], msg["params"].get("arguments", {})
-        value = (args["a"] + args["b"]) if name == "add" else str(args["text"]).upper()
+        if name == "search":
+            value = RESULTS[: int(args.get("limit", 10))]
+            if args.get("fields"):
+                names = [f.strip() for f in args["fields"].split(",")]
+                value = [{k: r.get(k) for k in names} for r in value]
+        else:
+            value = (args["a"] + args["b"]) if name == "add" else str(args["text"]).upper()
         return {"content": [{"type": "text", "text": json.dumps(value)}]}
     return {}
 

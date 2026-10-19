@@ -34,8 +34,14 @@ def load_key(key_file: str | None = None) -> str:
 
 
 def chat(key: str, model: str, messages: list[dict], timeout: int = 180,
-         json_schema: dict | None = None) -> tuple[str, dict]:
+         json_schema: dict | None = None, max_completion_tokens: int | None = None,
+         reasoning_max_tokens: int | None = None) -> tuple[str, dict]:
     payload: dict = {"model": model, "messages": messages, "temperature": 0}
+    if max_completion_tokens is not None:
+        payload["max_tokens"] = max_completion_tokens
+    if reasoning_max_tokens is not None:
+        # кап скрытого рассуждения: на простых намерениях это главный налог
+        payload["reasoning"] = {"max_tokens": reasoning_max_tokens}
     if json_schema is not None:
         # constrained decoding: провайдер не даст вернуть JSON вне схемы
         payload["response_format"] = {"type": "json_schema", "json_schema": json_schema}

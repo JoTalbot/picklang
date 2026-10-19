@@ -90,6 +90,43 @@ class Context:
             raise SimulatedCrash(f"simulated crash after {ex._steps_done} committed activities")
         return result
 
+    def execute_parallel(self, calls: list[tuple[str, dict, str]]) -> list[Any]:
+        """Frontier: независимые активности — одновременно, коммиты — в объявленном порядке.
+
+        Выполнение параллельное, запись результатов в журнал — строго по порядку
+        списка: digest исполнения не зависит от того, кто финишировал первым.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+        ex = self._ex
+        results: list[Any] = [None] * len(calls)
+        pending: dict[int, tuple[str, dict, str]] = {}
+        for i, (name, payload, key) in enumerate(calls):
+            step_id = f"par{i}:{name}:{key}"
+            if step_id in ex._completed:
+                stored = ex.cas.get_json(ex._completed[step_id])
+                results[i] = stored.get("result") if isinstance(stored, dict) else stored
+            else:
+                pending[i] = (name, payload, key)
+        if pending:
+            def run_one(item):
+                i, (name, payload, key) = item
+                handler = ex.handlers[name]
+                return i, handler({**payload, "_idempotency_key": key, "_execution_id": self.execution_id})
+            with ThreadPoolExecutor(max_workers=len(pending)) as pool:
+                done = dict(pool.map(run_one, pending.items()))
+            for i in pending:  # коммиты канонично по объявленному порядку
+                name, payload, key = pending[i]
+                result = done[i]
+                step_id = f"par{i}:{name}:{key}"
+                ref = ex.cas.put_json({"activity": name, "step": step_id, "result": result})
+                ex.log.append("ActivityCompleted", {"step": step_id, "activity": name,
+                                                    "idempotency_key": key,
+                                                    "input_digest": ex.cas.put_json(payload),
+                                                    "result_ref": ref})
+                ex._completed[step_id] = ref
+                results[i] = result
+        return results
+
     def wait_signal(self, name: str) -> Any:
         if name in self._ex._signals:
             return self._ex._signals[name]

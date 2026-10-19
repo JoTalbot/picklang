@@ -17,8 +17,16 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
+from functools import lru_cache
+
 from .parser import parse
 from .result_guard import estimate_tokens
+
+
+@lru_cache(maxsize=128)
+def _parse_cached(source: str):
+    """Программа парсится один раз по тексту (digest — сам текст в ключе lru_cache)."""
+    return parse(source)
 
 Registry = dict[str, Callable[..., Any]]
 
@@ -152,7 +160,7 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
                 capabilities: set[str] | None = None,
                 untrusted: tuple[str, ...] | set[str] = ()):
     """Возвращает (output, env, trace). Бросает WaitingSignal, если сигнала ещё нет."""
-    steps = parse(source)
+    steps = _parse_cached(source)
     env: dict[str, Any] = dict(inputs or {})
     compensations: list = []
     trace: list[str] = []
