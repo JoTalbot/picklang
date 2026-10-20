@@ -29,7 +29,7 @@ x = fn(a, b)                  call; result assigned to x
 x = fn(a) >> top(1)            pipeline: top(n), fields("k"), count()
 x = fn(a) ! undo(x)            saga compensation; runs LIFO if a later step fails
 a = f(x) || b = g(x)           parallel branches
-? condition -> fail "message"  guard: fail only when condition is false
+? condition -> fail "message"  guard: fail unless condition is true; fail only when condition is false
 @wait approval                 wait for signal; signal value becomes variable
 !budget steps<1                fail before exceeding the step budget
 out x / out {key: x}           return value
