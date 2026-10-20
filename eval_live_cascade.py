@@ -82,8 +82,9 @@ TASKS = [
                   "bank.refund": lambda tx: {"refunded": tx}},
      "inputs": {"u": "x", "amt": 5}, "expect_error": True, "after": {"bank.refund": 1}},
     {"name": "wait_approval",
-     "task": "Дождись внешнего сигнала approval (значение придёт в переменную approval), "
-             "поставь страж: ложь — отказ. Верни id из mail.send(user, \"ok\").",
+     "task": "Сгенерируй PICK программу с обязательным шагом @wait approval до проверки переменной approval. "
+             "Если approval ложно, программа должна упасть; иначе вызови mail.send(user, \"ok\") и верни m.id. "
+             "Не заменяй ожидание обычным стражем: валидатор проверяет факт ожидания сигнала.",
      "tools": ["mail.send"], "registry": {"mail.send": lambda user, text: {"id": "m3"}},
      "inputs": {"user": "x"}, "signals": {"approval": True}, "expected": "m3"},
     {"name": "parallel_two",
