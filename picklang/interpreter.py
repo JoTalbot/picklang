@@ -238,6 +238,16 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
             compensations.append(step.compensation)
         return value
 
+    def compensate() -> list[str]:
+        """Общий откат саги: выполняется на любом бизнес-сбое, кроме паузы/краха."""
+        comp_trace: list[str] = []
+        for comp in reversed(compensations):
+            try:
+                _eval(comp, env, registry, activity_hook, comp_trace, state)
+            except Exception:
+                pass
+        return comp_trace
+
     try:
         for step in steps:
             if step.kind == "goal":
@@ -305,17 +315,19 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
                     state.approved = bool(value)
             elif step.kind == "out":
                 output = _eval(step.expr, env, registry, activity_hook, trace, state)
-    except (PickRuntimeError, WaitingSignal, AbortExecution):
+    except (WaitingSignal, AbortExecution):
+        # Пауза и искусственный крах не откатывают сагу: продолжение будет с этого же места.
+        raise
+    except PickRuntimeError:
+        # Бизнес-сбой (страж, бюджет, недопустимое состояние) обязан откатить сагу,
+        # ровно как и любая другая ошибка: иначе деньги/резервы остаются списанными.
+        compensate()
         raise
     except Exception as exc:
-        comp_trace: list[str] = []
-        for comp in reversed(compensations):
-            try:
-                _eval(comp, env, registry, activity_hook, comp_trace, state)
-            except Exception:
-                pass
+        comp_trace = compensate()
         raise PickRuntimeError(f"выполнение сорвалось, компенсаций выполнено: {len(comp_trace)}; причина: {exc}") from exc
     for cond in done_conditions:
         if not _eval(cond, env, registry, activity_hook, trace, state):
+            compensate()
             raise TaskNotDone("критерии готовности (done when) не выполнены")
     return output, env, trace

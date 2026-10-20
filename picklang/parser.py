@@ -66,6 +66,12 @@ def _parse_expr(text: str, line: int, raw: str, depth: int = 0):
         args_text = m.group(2).strip()
         args = [_parse_expr(a, line, raw, depth + 1) for a in _split_top(args_text, ",")] if args_text else []
         return ("call", m.group(1), args)
+    # Ключевые слова-литералы разбираются ДО переменной: иначе 'true' попадало
+    # в ('var', 'true') и падало в рантайме «переменная не определена: true».
+    literal_words = {"true": True, "false": False, "null": None,
+                     "True": True, "False": False, "None": None}
+    if text in literal_words:
+        return ("lit", literal_words[text])
     if re.fullmatch(r"[A-Za-z_]\w*", text):
         return ("var", text)
     if re.fullmatch(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)+", text):

@@ -5,7 +5,9 @@
 Гарантии и честные границы:
 - переживает падение процесса между активностями (результат закоммичен до следующего шага);
 - НЕ даёт exactly-once внешних сайд-эффектов сам по себе: обработчик активности обязан
-  быть идемпотентным по idempotency_key (как Activities в Temporal);
+  быть идемпотентным по `_idempotency_key` (как Activities в Temporal). Рантайм кладёт
+  туда step_id — идентификатор позиции шага («seq:activity:key»), уникальный для
+  каждого вызова и стабильный при replay; ключ вызывающего доступен в `_requested_key`;
 - каждое завершение активности: результат -> CAS, событие в хэш-цепочку, digest растёт.
 """
 from __future__ import annotations
@@ -73,7 +75,13 @@ class Context:
         last_exc: Exception | None = None
         for attempt in range(retries + 1):
             try:
-                result = handler({**payload, "_idempotency_key": idempotency_key, "_execution_id": self.execution_id})
+                # Документированный контракт: обработчик дедуплицирует по _idempotency_key.
+                # Поэтому туда уходит step_id (уникален на позицию программы и стабилен
+                # при replay), а не имя активности: две разные операции одного типа
+                # (два списания) не должны схлопываться в одну.
+                result = handler({**payload, "_idempotency_key": step_id,
+                                  "_requested_key": idempotency_key,
+                                  "_execution_id": self.execution_id})
                 break
             except SimulatedCrash:
                 raise
@@ -107,7 +115,8 @@ class Context:
             def run_one(item):
                 i, (name, payload, key) = item
                 handler = ex.handlers[name]
-                return i, handler({**payload, "_idempotency_key": key, "_execution_id": self.execution_id})
+                return i, handler({**payload, "_idempotency_key": f"par{i}:{name}:{key}",
+                                   "_requested_key": key, "_execution_id": self.execution_id})
             with ThreadPoolExecutor(max_workers=len(pending)) as pool:
                 done = dict(pool.map(run_one, pending.items()))
             batch = []
@@ -153,6 +162,7 @@ class DurableExecutor:
         self._completed: dict[str, str] = {}
         self._signals: dict[str, Any] = {}
         self._steps_done = 0
+        self._seq_counter = 0        # для async-исполнителя: уникальность step_id внутри запуска
 
     def _commit_activity(self, step_id: str, name: str, payload: dict, result: Any,
                          idempotency_key: str | None = None) -> str:
@@ -178,6 +188,7 @@ class DurableExecutor:
         self._completed = {}
         self._signals = {}
         self.snapshot_used = False
+        self._seq_counter = 0
         events = self.log.events
         start = 0
         # П.1: последний снимок даёт completed-карту сразу; обрабатываем только хвост после него
