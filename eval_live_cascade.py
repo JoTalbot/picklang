@@ -23,7 +23,7 @@ from picklang.live_agent import load_key            # noqa: E402
 from picklang.stdlib import with_stdlib             # noqa: E402
 
 GRAMMAR = """Write one valid PICK program only. No markdown or explanation.
-One line = one step. Follow these exact forms:
+One line per step:
 > name(a, b)                  header; parameters
 x = fn(a, b)                  call; result assigned to x
 x = fn(a) >> top(1)            pipeline: top(n), fields("k"), count()
