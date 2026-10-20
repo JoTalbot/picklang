@@ -108,6 +108,9 @@ def test_temporal_adapter():
     from durable_weave.temporal_adapter import generate_temporal_code
     code = generate_temporal_code()
     assert "class PickWorkflow" in code and "execute_activity" in code
+    assert 'if "cmp" in expr:' in code
+    assert "unknown comparison" in code
+    compile(code, "<generated-temporal-workflow>", "exec")
     temporalio = pytest.importorskip("temporalio")
     from durable_weave.temporal_adapter import build_temporal_workflow
     wf, act = build_temporal_workflow()
