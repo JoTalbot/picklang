@@ -35,7 +35,8 @@ class ModelCascade:
                     if "HTTP 429" in message or "Rate limit exceeded" in message:
                         raise RuntimeError(f"provider rate limit; stopping cascade early: {message[:180]}") from e
                     continue
-                self.log.append({"tier": tier_no, "model": model, "ok": ok, "usage": usage})
+                self.log.append({"tier": tier_no, "model": model, "ok": ok, "usage": usage,
+                                 **({"response_preview": text.strip()[:240]} if not ok else {})})
                 if ok:
                     return {"model": model, "tier": tier_no, "text": text, "usage": usage, "log": self.log}
         raise RuntimeError(f"каскад исчерпан: {self.log}")

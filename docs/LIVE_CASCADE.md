@@ -1,6 +1,8 @@
-# Живой каскад моделей (OpenRouter, free tier, $0)
+# Live cascade: validation policy
 
-Валидатор: парсинг + check + исполнение на моках до ожидаемого результата.
+The current workflow tests 12 tasks: six straight-line tasks plus guard success/failure, saga rollback, signal wait, parallel branches, and budget enforcement. The live run is a release gate; use the exact workflow run logs and Job Summary for current results.
+
+Historical numbers below describe an older OpenRouter free-tier run on a different model pool. They are not a result for the current Groq configuration and must not be used to claim that the current 12-task suite passed.
 
 | Задача | OK | Tier | Модель | Попыток | Сек | Токены |
 |---|---|---|---|---:|---:|---:|
@@ -11,7 +13,7 @@
 | count_results | True | 0 | liquid/lfm-2.5-2.6b:free | 1 | 14.5 | 241+3501 |
 | guard_charge | True | 1 | nvidia/nemotron-3-super-120b-a12b:free | 3 | 422.9 | 723+5500 |
 
-Итого: 6/6; дешёвым tier-0 решено 3; всего токенов 21597.
+Исторический итог этого старого прогона: 6/6; дешёвым tier-0 решено 3; всего токенов 21597.
 Оговорка: free tier нестабилен — цифры одного прогона, а не статистика.
 Зафиксированная аномалия: guard_charge заняла 423 с при таймауте попытки 45 с.
 Причина: urllib-таймаут — на каждую операцию чтения, а не на запрос целиком;

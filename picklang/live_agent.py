@@ -77,7 +77,16 @@ def chat(key: str, model: str, messages: list[dict], timeout: int = 180,
          reasoning_max_tokens: int | None = None) -> tuple[str, dict]:
     payload: dict = {"model": model, "messages": messages, "temperature": 0}
     if max_completion_tokens is not None:
-        payload["max_tokens"] = max_completion_tokens
+        token_limit_key = "max_completion_tokens" if "api.groq.com" in API else "max_tokens"
+        payload[token_limit_key] = max_completion_tokens
+    if "api.groq.com" in API and model in {"openai/gpt-oss-20b", "openai/gpt-oss-120b"}:
+        # GPT-OSS on Groq otherwise defaults to medium reasoning, which can consume
+        # the entire completion budget before producing the short PICK program.
+        effort = os.environ.get("PICK_LIVE_REASONING_EFFORT", "low").strip().lower()
+        if effort not in {"low", "medium", "high"}:
+            raise LLMError("PICK_LIVE_REASONING_EFFORT must be low, medium, or high")
+        payload["reasoning_effort"] = effort
+        payload["include_reasoning"] = False
     if reasoning_max_tokens is not None and "api.groq.com" not in API:
         # OpenRouter supports this cap; Groq's OpenAI-compatible endpoint does not.
         payload["reasoning"] = {"max_tokens": reasoning_max_tokens}

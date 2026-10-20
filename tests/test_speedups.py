@@ -77,3 +77,20 @@ def test_mcp_pool_reuses_connection():
         assert out == [3, 7] and pool.stats["connects"] == 1 and pool.stats["calls"] == 2
     finally:
         pool.close_all()
+
+
+def test_groq_gpt_oss_uses_low_reasoning_and_current_token_limit(monkeypatch):
+    import json
+    import picklang.live_agent as la
+
+    captured = {}
+    monkeypatch.setattr(la, "API", "https://api.groq.com/openai/v1/chat/completions")
+    def fake_post(url, body, headers, timeout):
+        captured.update(json.loads(body.decode()))
+        return {"choices": [{"message": {"content": "out 1"}}], "usage": {}}
+    monkeypatch.setattr(la, "_post_with_deadline", fake_post)
+    la.chat("k", "openai/gpt-oss-20b", [{"role": "user", "content": "x"}],
+            max_completion_tokens=512)
+    assert captured["max_completion_tokens"] == 512
+    assert captured["reasoning_effort"] == "low"
+    assert captured["include_reasoning"] is False
