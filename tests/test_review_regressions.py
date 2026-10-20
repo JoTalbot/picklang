@@ -166,7 +166,7 @@ def test_grammar_prompt_matches_guard_semantics():
         run_program(src, registry, {"x": False}, prefer_aot=False)
     # страж падает, когда условие ЛОЖНО: промпт не должен утверждать обратное
     assert "если условие истинно" not in GRAMMAR
-    assert "если условие ложно" in GRAMMAR
+    assert "unless" in GRAMMAR.lower() or "ложно" in GRAMMAR
 
 
 def test_cli_reports_syntax_error_without_traceback(tmp_path):

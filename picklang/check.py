@@ -47,14 +47,27 @@ def _expr_calls(expr):
         return
     if "call" in expr:
         yield expr["call"], len(expr.get("args", []))
-        for a in expr["args"]:
+        for a in expr.get("args", []):
             yield from _expr_calls(a)
-    for key in ("pipe",):
-        for item in expr.get(key, []) if isinstance(expr.get(key), list) else []:
+        return
+    if "pipe" in expr:
+        for item in expr.get("pipe") or []:
             yield from _expr_calls(item)
+        return
     if "map" in expr:
-        for _k, v in expr["map"]:
+        for _k, v in expr.get("map") or []:
             yield from _expr_calls(v)
+        return
+    # cmp и прочие составные выражения: спускаемся по значениям
+    for v in expr.values():
+        if isinstance(v, dict):
+            yield from _expr_calls(v)
+        elif isinstance(v, list):
+            for item in v:
+                if isinstance(item, dict):
+                    yield from _expr_calls(item)
+                elif isinstance(item, list) and len(item) == 2 and isinstance(item[1], dict):
+                    yield from _expr_calls(item[1])
 
 
 def check_ir(ir: dict[str, Any], registry: dict | None = None) -> list[dict[str, Any]]:
@@ -68,6 +81,33 @@ def check_ir(ir: dict[str, Any], registry: dict | None = None) -> list[dict[str,
             ar = _sig_arity(fn) if callable(fn) else fn
             if ar:
                 arities[name] = ar
+
+    def scan(expr, line: int, injected: int = 0) -> None:
+        for var in _expr_vars(expr):
+            if var not in defined:
+                diags.append({"line": line, "level": "error", "code": "UNDEFINED_VAR",
+                              "message": f"переменная '{var}' используется до привязки"})
+        if isinstance(expr, dict) and "pipe" in expr:
+            # Пайплайн: результат левой части становится ПЕРВЫМ аргументом правой,
+            # поэтому стадия после первой получает +1 к объявленной арности.
+            for index, part in enumerate(expr.get("pipe") or []):
+                scan(part, line, injected=1 if index else 0)
+            return
+        calls = list(_expr_calls(expr))
+        if isinstance(expr, dict) and "call" in expr and calls and injected:
+            calls[0] = (calls[0][0], calls[0][1] + injected)
+        for name, argc in calls:
+            if registry is not None and name not in registry:
+                close = difflib.get_close_matches(name, list(registry), n=1)
+                diags.append({"line": line, "level": "error", "code": "UNKNOWN_FN",
+                              "message": f"функция '{name}' не зарегистрирована хостом",
+                              "suggestion": close[0] if close else None})
+            elif name in arities:
+                lo, hi = arities[name]
+                if not (lo <= argc <= hi):
+                    diags.append({"line": line, "level": "error", "code": "ARITY",
+                                  "message": f"'{name}' ждёт {lo}..{hi} аргументов, дано {argc}"})
+
     for step in ir.get("steps", []):
         line = step.get("line", 0)
         if step["kind"] == "goal":
@@ -78,42 +118,33 @@ def check_ir(ir: dict[str, Any], registry: dict | None = None) -> list[dict[str,
                               "message": "цель > ... объявлена повторно"})
         # expr шага проверяется до привязки цели, компенсация — после:
         # она исполняется позже и законно ссылается на результат шага (p.tx).
-        exprs = [step[k] for k in ("expr", "fail") if k in step]
-        if step["kind"] == "assign" and step.get("target"):
-            # цель станет определена для компенсации и следующих шагов
-            pass
-        for expr in exprs:
-            for var in _expr_vars(expr):
-                if var not in defined:
-                    diags.append({"line": line, "level": "error", "code": "UNDEFINED_VAR",
-                                  "message": f"переменная '{var}' используется до привязки"})
-            for name, argc in _expr_calls(expr):
-                if registry is not None and name not in registry:
-                    close = difflib.get_close_matches(name, list(registry), n=1)
-                    diags.append({"line": line, "level": "error", "code": "UNKNOWN_FN",
-                                  "message": f"функция '{name}' не зарегистрирована хостом",
-                                  "suggestion": close[0] if close else None})
-                elif name in arities:
-                    lo, hi = arities[name]
-                    if not (lo <= argc <= hi):
-                        diags.append({"line": line, "level": "error", "code": "ARITY",
-                                      "message": f"'{name}' ждёт {lo}..{hi} аргументов, дано {argc}"})
+        for key in ("expr", "fail"):
+            if key in step:
+                scan(step[key], line)
         if step["kind"] == "assign" and step.get("target"):
             defined.add(step["target"])
         if "compensation" in step:
-            for var in _expr_vars(step["compensation"]):
-                if var not in defined:
-                    diags.append({"line": line, "level": "error", "code": "UNDEFINED_VAR",
-                                  "message": f"переменная '{var}' используется до привязки"})
-            for name, argc in _expr_calls(step["compensation"]):
-                if registry is not None and name not in registry:
-                    close = difflib.get_close_matches(name, list(registry), n=1)
-                    diags.append({"line": line, "level": "error", "code": "UNKNOWN_FN",
-                                  "message": f"функция '{name}' не зарегистрирована хостом",
-                                  "suggestion": close[0] if close else None})
-        if step["kind"] == "wait":
+            scan(step["compensation"], line)
+        if step["kind"] == "parallel":
+            # Ветви объявляют свои цели: a = f(x) || b = g(x) -> a и b определены.
+            for target, branch_expr in step.get("branches", []):
+                scan(branch_expr, line)
+                if target:
+                    defined.add(target)
+        elif step["kind"] == "loop":
+            if step.get("loop_var"):
+                defined.add(step["loop_var"])
+            body = step.get("body") or {}
+            if body.get("expr") is not None:
+                scan(body["expr"], line)
+            if body.get("target"):
+                defined.add(body["target"])
+        elif step["kind"] == "donewhen":
+            for cond in step.get("conditions") or []:
+                scan(cond, line)
+        elif step["kind"] == "wait":
             defined.add(step["signal"])
-        if step["kind"] == "out":
+        elif step["kind"] == "out":
             has_out = True
     if not has_out:
         diags.append({"line": 0, "level": "error", "code": "NO_OUT",

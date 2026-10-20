@@ -158,18 +158,29 @@ def main():
             errors = [item for item in check_source(source, registry) if item.get("level") == "error"]
             if errors:
                 raise ValueError("validated PICK source no longer passes check")
-            output, _, _ = run_program(source, registry, dict(task["inputs"]), prefer_aot=False)
+            expected_error = bool(task.get("expect_error"))
+            signals = task.get("signals") or {}
+            try:
+                output, _, _ = run_program(source, registry, dict(task["inputs"]),
+                                           signal_provider=lambda name: signals.get(name),
+                                           prefer_aot=False)
+            except Exception:
+                if not expected_error:
+                    raise
+                output = None
             captured["output"] = output
+            captured["ok"] = (output is None) if expected_error else (output == task["expected"])
         elapsed = round(time.monotonic() - started, 4)
         usage = {"prompt_tokens": 0, "completion_tokens": 0}
         for entry in cascade.log:
             for field in usage:
                 usage[field] += (entry.get("usage") or {}).get(field, 0) or 0
-        print(json.dumps({"ok": captured["output"] == task["expected"], "output": captured["output"],
+        ok = captured.get("ok", captured["output"] == task["expected"])
+        print(json.dumps({"ok": ok, "output": captured["output"],
             "model": result["model"], "attempts": len(cascade.log),
             "prompt_tokens": usage["prompt_tokens"], "completion_tokens": usage["completion_tokens"],
             "seconds": elapsed}, ensure_ascii=False))
-        return 0 if captured["output"] == task["expected"] else 1
+        return 0 if ok else 1
     except Exception as exc:
         failure = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:240]}"}
         failure.update(cascade_usage(cascade))
