@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from picklang.interpreter import AbortExecution, WaitingSignal, run_program
+from picklang.interpreter import AbortExecution, WaitingSignal, resolve_secrets, run_program
 
 from .executor import DurableExecutor
 
@@ -24,7 +24,9 @@ def make_executor(workdir, registry, crash_after=None) -> DurableExecutor:
     handlers = {}
     for name, fn in registry.items():
         def make(fn):
-            return lambda payload: fn(*payload.get("args", []))
+            # `secret:NAME` подставляется здесь и только при реальном вызове:
+            # replay завершённого шага не обращается к окружению.
+            return lambda payload: fn(*resolve_secrets(payload.get("args", [])))
         handlers[name] = make(fn)
     return DurableExecutor(Path(workdir), handlers, crash_after=crash_after)
 
