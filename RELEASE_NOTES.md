@@ -1,3 +1,16 @@
+# picklang 0.1.4
+
+Patch release focused on parity and release validation.
+
+- Fix Temporal generated workflow code so comparison expressions are evaluated, including explicit rejection of unsupported comparison operators.
+- Add a regression test that compiles generated Temporal source and verifies comparison support before the optional SDK integration check.
+- Keep the release gate tied to the exact main commit: unit tests, package build and smoke checks, and all six live Groq cascade tasks must pass.
+- Preserve transparent paired A/B results in workflow logs and Job Summary; a single live sample is evidence for that run only, not a general performance guarantee.
+
+The latest validated live cascade passed 6/6 tasks, with 4/6 solved on tier-0. The paired one-repeat benchmark recorded PICK 6/6 and classic Python 5/6 on the same model; it is a small sample and does not establish a general speed or cost advantage. Live evaluation consumes provider quota.
+
+---
+
 # picklang 0.1.2
 
 Patch release.
