@@ -5,6 +5,7 @@ Patch release focused on parity and release validation.
 - Fix Temporal generated workflow code so comparison expressions are evaluated, including explicit rejection of unsupported comparison operators.
 - Add a regression test that compiles generated Temporal source and verifies comparison support before the optional SDK integration check.
 - Make the live-task grammar explicit again, include a short canonical example, and print bounded rejected-response diagnostics directly in Actions logs to catch prompt regressions.
+- Clarify that the live signal-wait task must contain an explicit `@wait approval` step; a plain guard is not a durable wait.
 - Keep the release gate tied to the exact main commit: unit tests, package build and smoke checks, and all six live Groq cascade tasks must pass.
 - Preserve transparent paired A/B results in workflow logs and Job Summary; a single live sample is evidence for that run only, not a general performance guarantee.
 
