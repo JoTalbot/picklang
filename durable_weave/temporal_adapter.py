@@ -68,6 +68,17 @@ class {workflow_name}:
             for part in parts[1:]:
                 value = value[part]
             return value
+        if "cmp" in expr:
+            op, left, right = expr["cmp"]
+            lv, rv = await self._eval(left, env), await self._eval(right, env)
+            comparisons = {{
+                "==": lambda: lv == rv, "!=": lambda: lv != rv,
+                ">": lambda: lv > rv, "<": lambda: lv < rv,
+                ">=": lambda: lv >= rv, "<=": lambda: lv <= rv,
+            }}
+            if op not in comparisons:
+                raise ApplicationError(f"unknown comparison: {{op}}", non_retryable=True)
+            return comparisons[op]()
         if "map" in expr:
             return {{k: await self._eval(v, env) for k, v in expr["map"]}}
         if "pipe" in expr:
