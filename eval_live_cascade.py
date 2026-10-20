@@ -22,16 +22,27 @@ from picklang.interpreter import run_program        # noqa: E402
 from picklang.live_agent import load_key            # noqa: E402
 from picklang.stdlib import with_stdlib             # noqa: E402
 
-GRAMMAR = """PICK: code only (no markdown), line = step.
-> f(a) header, inputs
-!budget steps<20 budget
-x = fn(a) call -> x; fields: p.tx
-x = fn(a) ! u(b) saga: undo on failure, LIFO
-a = f(x) || b = g(x) parallel
-x = fn(a) >> top(2) pipeline: top(n), fields("k"), count()
-? c -> fail "m" fail unless c
-@wait s wait; signal -> s
-out {k: x} result
+GRAMMAR = """Write one valid PICK program only. No markdown or explanation.
+One line = one step. Follow these exact forms:
+> name(a, b)                  header; parameters
+x = fn(a, b)                  call; result assigned to x
+x = fn(a) >> top(1)            pipeline: top(n), fields("k"), count()
+x = fn(a) ! undo(x)            saga compensation; runs LIFO if a later step fails
+a = f(x) || b = g(x)           parallel branches
+? condition -> fail "message"  guard: fail only when condition is false
+@wait approval                 wait for signal; signal value becomes variable
+!budget steps<1                fail before exceeding the step budget
+out x / out {key: x}           return value
+Use only listed host functions. Field access: p.tx.
+Example:
+> t(u)
+p = bank.charge(u, 5)
+out p.tx
+Guard+saga example:
+> t(u, amt)
+p = bank.charge(u, amt) ! bank.refund(p.tx)
+? p.ok -> fail "declined"
+out p.tx
 """
 TASKS = [
     {"name": "charge_tx", "task": "Спиши с пользователя u сумму 5 через bank.charge(u, amount) -> {ok, tx}. Верни tx.",
@@ -214,6 +225,11 @@ def main():
             row["prompt_tokens"] += u.get("prompt_tokens", 0) or 0
             row["completion_tokens"] += u.get("completion_tokens", 0) or 0
         row["log"] = cascade.log
+        for attempt in cascade.log:
+            if not attempt.get("ok"):
+                detail = attempt.get("error") or attempt.get("response_preview")
+                if detail:
+                    print(f"  rejected {attempt.get('model', 'unknown')}: {str(detail)[:240]}", flush=True)
         results.append(row)
         print(f"[{task['name']}] ok={row['ok']} tier={row['tier']} model={row['model']} "
               f"попыток={row['attempts']} {row['seconds']}с tok={row['prompt_tokens']}+{row['completion_tokens']}", flush=True)
