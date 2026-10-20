@@ -45,6 +45,12 @@ def test_saga_rollback_requires_a_compensation():
     assert make_validator(task)(without_undo) is False
 
 
+def test_wait_task_prompt_requires_explicit_signal_wait():
+    task = next(item for item in TASKS if item["name"] == "wait_approval")
+    assert "@wait approval" in task["task"]
+    assert "Не заменяй ожидание обычным стражем" in task["task"]
+
+
 def test_wait_task_rejects_missing_wait():
     task = next(item for item in TASKS if item["name"] == "wait_approval")
     assert make_validator(task)('> t(user)\nm = mail.send(user, "ok")\nout m.id\n') is False
