@@ -59,3 +59,14 @@ def test_grammar_stays_compact_and_states_guard_semantics():
     assert "condition is false" in GRAMMAR
     assert "Guard+saga example:" in GRAMMAR
     assert "out p.tx" in GRAMMAR
+
+
+def test_failed_model_response_is_logged_with_a_bounded_preview(monkeypatch):
+    import picklang.cascade as cascade_module
+    from picklang.cascade import ModelCascade
+
+    monkeypatch.setattr(cascade_module, "chat", lambda *args, **kwargs: ("x" * 500, {"completion_tokens": 500}))
+    cascade = ModelCascade([["fake-model"]])
+    with pytest.raises(RuntimeError, match="каскад исчерпан"):
+        cascade.run("unused", [], lambda _text: False)
+    assert cascade.log[0]["response_preview"] == "x" * 240
