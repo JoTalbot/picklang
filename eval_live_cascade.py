@@ -171,18 +171,18 @@ def build_cascade_prompt(task):
     if name not in CASCADE_TASK_GUIDES:
         return (
             GRAMMAR
-            + f"\\nФункции хоста: {', '.join(task['tools'])}"
-            + f"\\nВход: {list(task['inputs'])}\\nЗадача: {task['task']}\\n"
+            + f"\nФункции хоста: {', '.join(task['tools'])}"
+            + f"\nВход: {list(task['inputs'])}\nЗадача: {task['task']}\n"
         )
     return (
         "Выведи только валидную программу PICK, без Markdown. "
         "> name(params) задаёт входы; x = fn(args) вызывает инструмент; "
-        "out x возвращает результат. Поля доступны как p.tx.\\n"
-        f"Правило: {CASCADE_TASK_GUIDES[name]}\\n"
-        f"Пример:\\n{CASCADE_TASK_EXAMPLES[name]}\\n"
-        f"Функции хоста: {', '.join(task['tools'])}\\n"
-        f"Вход: {list(task['inputs'])}\\n"
-        f"Задача: {task['task']}\\n"
+        "out x возвращает результат. Поля доступны как p.tx.\n"
+        f"Правило: {CASCADE_TASK_GUIDES[name]}\n"
+        f"Пример:\n{CASCADE_TASK_EXAMPLES[name]}\n"
+        f"Функции хоста: {', '.join(task['tools'])}\n"
+        f"Вход: {list(task['inputs'])}\n"
+        f"Задача: {task['task']}\n"
     )
 
 
