@@ -4,19 +4,30 @@ from bench_gate import evaluate_report
 
 
 def report(pick_tokens=80, baseline_tokens=100):
+    tasks = ["one", "two"]
+    pick = []
+    baseline = []
+    for repeat in (1,):
+        for index, task in enumerate(tasks):
+            pick.append({
+                "task": task, "repeat": repeat, "input_digest": f"digest-{task}",
+                "model": "test-model", "ok": True, "output_match": True,
+                "prompt_tokens": pick_tokens // 2 if index == 0 else 0,
+                "completion_tokens": pick_tokens - pick_tokens // 2 if index == 0 else 0,
+            })
+            baseline.append({
+                "task": task, "repeat": repeat, "input_digest": f"digest-{task}",
+                "model": "test-model", "ok": True, "output_match": True,
+                "prompt_tokens": baseline_tokens // 2 if index == 0 else 0,
+                "completion_tokens": baseline_tokens - baseline_tokens // 2 if index == 0 else 0,
+            })
     return {
         "status": "COMPLETED",
         "rate_limit_detected": False,
-        "tasks": ["one", "two"],
+        "tasks": tasks,
         "repeats": 1,
-        "pick": [
-            {"ok": True, "output_match": True, "prompt_tokens": pick_tokens // 2, "completion_tokens": pick_tokens - pick_tokens // 2},
-            {"ok": True, "output_match": True, "prompt_tokens": 0, "completion_tokens": 0},
-        ],
-        "baseline": [
-            {"ok": True, "output_match": True, "prompt_tokens": baseline_tokens // 2, "completion_tokens": baseline_tokens - baseline_tokens // 2},
-            {"ok": True, "output_match": True, "prompt_tokens": 0, "completion_tokens": 0},
-        ],
+        "pick": pick,
+        "baseline": baseline,
     }
 
 
@@ -62,3 +73,31 @@ def test_gate_rejects_missing_usage_telemetry():
     passed, message = evaluate_report(candidate)
     assert passed is False
     assert "telemetry" in message
+
+
+def test_gate_rejects_misaligned_task_or_repeat():
+    candidate = report()
+    candidate["baseline"][0]["task"] = "two"
+    passed, message = evaluate_report(candidate)
+    assert passed is False
+    assert "pairing integrity failed" in message
+
+    candidate = report()
+    candidate["pick"][1]["repeat"] = 2
+    passed, message = evaluate_report(candidate)
+    assert passed is False
+    assert "pairing integrity failed" in message
+
+
+def test_gate_rejects_different_inputs_or_models():
+    candidate = report()
+    candidate["baseline"][0]["input_digest"] = "different-input"
+    passed, message = evaluate_report(candidate)
+    assert passed is False
+    assert "input integrity failed" in message
+
+    candidate = report()
+    candidate["baseline"][0]["model"] = "another-model"
+    passed, message = evaluate_report(candidate)
+    assert passed is False
+    assert "model mismatch" in message
