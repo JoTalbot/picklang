@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from bench_pair import load_tasks, run_one, run_pair
+from bench_pair import is_provider_rate_limit, load_tasks, run_one, run_pair
 
 
 def adapter(code):
@@ -124,3 +124,10 @@ def test_provider_rate_limit_stops_all_remaining_calls(tmp_path):
     assert not marker.exists()
     assert report["comparison"]["output_comparable"] == 0
     assert report["comparison"]["exact_output_match_rate"] is None
+
+
+def test_rate_limit_detector_does_not_match_429_inside_decimal_telemetry():
+    assert not is_provider_rate_limit({"error": "completion_time': 0.05942919"})
+    assert not is_provider_rate_limit({"error": "normal failure after 0.123429 seconds"})
+    assert is_provider_rate_limit({"error": "provider returned HTTP 429 Too Many Requests"})
+    assert is_provider_rate_limit({"error": "rate_limit_exceeded"})

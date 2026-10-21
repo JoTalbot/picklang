@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import re
 import shlex
 import subprocess
 import sys
@@ -70,8 +71,11 @@ def run_one(command, task, timeout):
 def is_provider_rate_limit(row):
     """Recognize provider throttling without treating ordinary task failures as quota events."""
     text = " ".join(str(row.get(key, "")) for key in ("error", "stderr", "stdout")).lower()
+    # Match an actual status code, not the digits "429" inside provider timing
+    # telemetry such as 0.05942919. Word/decimal boundaries matter here.
+    has_status_429 = re.search(r"(?<![A-Za-z0-9_.])429(?![A-Za-z0-9_.])", text) is not None
     return (
-        "429" in text
+        has_status_429
         or "rate limit" in text
         or "rate_limit" in text
         or "quota exceeded" in text

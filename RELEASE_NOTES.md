@@ -3,9 +3,10 @@
 Patch release focused on reducing live prompt overhead while retaining strict correctness checks.
 
 - Use task-scoped PICK instructions for the six paired benchmark tasks instead of repeating the full DSL grammar on every request.
-- Keep operator-specific guidance and examples only where needed; unknown tasks fall back to the complete grammar.
+- Keep operator-specific guidance and a short executable example for each paired task; unknown tasks fall back to the complete grammar.
 - Add regression tests for prompt size, required operator guidance, and safe fallback behavior.
 - Strengthen the release gate: the paired benchmark must pass every task with identical outputs, provide nonzero usage telemetry, and demonstrate lower total reported tokens for PICK than classic Python. Rate-limited or incomplete runs are inconclusive and cannot publish this optimization release.
+- Fix false HTTP 429 detection caused by matching the digits inside decimal timing telemetry; add a regression test for the exact boundary case.
 - Keep the separate 12-task Groq cascade as an independent correctness gate.
 
 Verified v0.1.5 baseline on 2026-10-21: same-model paired run passed 6/6 tasks for both PICK and classic Python, with identical outputs on all six. PICK used 2,710 reported tokens and 4.94 seconds summed invocation time; Python used 2,105 tokens and 3.30 seconds. This is a single small sample, not a general performance claim. v0.1.6 will publish only if the new live run demonstrates a token reduction without task regressions.
