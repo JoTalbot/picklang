@@ -25,6 +25,14 @@ def solve(u):
     message = mail.send(u, sub["id"])
     return {"sub": sub["id"], "message": message["id"]}
 """
+PICK_TASK_GUIDES = {
+    "charge_tx": "Используй bank.charge(u, 5); верни поле tx.",
+    "search_top1": "Для первого результата используй пайплайн >> top(1).",
+    "double_value": "Вызови dbl(i) и верни результат.",
+    "fields_a": "Для проекции поля используй пайплайн >> fields(\\"a\\").",
+    "count_results": "Для количества элементов используй пайплайн >> count().",
+    "multi_step_subscribe": "Вызови инструменты последовательно; второй вызов использует sub.id.",
+}
 PICK_TASK_EXAMPLES = {
     "search_top1": """> search(q)
 results = web.search(q) >> top(1)
@@ -34,6 +42,33 @@ sub = db.create_sub(u)
 msg = mail.send(u, sub.id)
 out {sub: sub.id, message: msg.id}""",
 }
+PICK_COMMON = (
+    "Выведи только программу PICK, без Markdown. "
+    "> name(params) задаёт входы; x = fn(args) вызывает инструмент; "
+    "out x возвращает результат. Поля: p.tx. Используй только перечисленные функции."
+)
+
+
+def build_pick_prompt(task):
+    """Build a task-scoped prompt so unrelated DSL features are not billed on every call."""
+    name = task["name"]
+    if name not in PICK_TASK_GUIDES:
+        return (
+            GRAMMAR
+            + f"\nФункции хоста: {', '.join(task['tools'])}"
+            + f"\nВходные данные: {json.dumps(task['inputs'], ensure_ascii=False)}"
+            + f"\nЗадача: {task['task']}\n"
+        )
+    example = PICK_TASK_EXAMPLES.get(name)
+    example_text = f"\nПример:\n{example}" if example else ""
+    return (
+        f"{PICK_COMMON}\n"
+        f"Правило: {PICK_TASK_GUIDES[name]}{example_text}\n"
+        f"Функции хоста: {', '.join(task['tools'])}\n"
+        f"Входные данные: {json.dumps(task['inputs'], ensure_ascii=False)}\n"
+        f"Задача: {task['task']}\n"
+    )
+
 ALLOWED_AST = {ast.Module, ast.FunctionDef, ast.arguments, ast.arg, ast.Return,
     ast.Assign, ast.Expr, ast.Call, ast.Name, ast.Load, ast.Store, ast.Constant,
     ast.Dict, ast.List, ast.Tuple, ast.Subscript, ast.Slice, ast.BinOp, ast.Mult, ast.Add,
@@ -144,9 +179,11 @@ def main():
             # Keep the PICK prompt in the same language and wording as the
             # canonical live-cascade task; the DSL grammar/examples are Russian.
             pick_description = task["task"]
-            example = PICK_TASK_EXAMPLES.get(task_name)
-            example_text = f"\nПример для похожей задачи:\n{example}\n" if example else ""
-            prompt = GRAMMAR + example_text + f"\nФункции хоста: {', '.join(task['tools'])}\nВходные данные: {json.dumps(task['inputs'], ensure_ascii=False)}\nЗадача: {pick_description}\n"
+            # The paired benchmark uses a compact task-scoped prompt. The separate
+            # 12-task cascade retains the full grammar for feature coverage.
+            prompt_task = dict(task)
+            prompt_task["task"] = pick_description
+            prompt = build_pick_prompt(prompt_task)
             validator = make_validator(task)
         else:
             prompt = (PYTHON_GRAMMAR + f"\nTask: {description}\nInputs: {json.dumps(task['inputs'], ensure_ascii=False)}\n"
