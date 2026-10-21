@@ -43,6 +43,17 @@ Guard+saga example:
 p = bank.charge(u, amt) ! bank.refund(p.tx)
 ? p.ok -> fail "declined"
 out p.tx
+
+Pipeline example: select the first search result.
+> search(q)
+results = web.search(q) >> top(1)
+out results
+
+Sequential calls and object fields:
+> notify(u)
+sub = db.create_sub(u)
+msg = mail.send(u, sub.id)
+out {sub: sub.id, message: msg.id}
 """
 TASKS = [
     {"name": "charge_tx", "task": "Спиши с пользователя u сумму 5 через bank.charge(u, amount) -> {ok, tx}. Верни tx.",
