@@ -160,7 +160,7 @@ def test_repeat_delay_waits_between_rounds_only(monkeypatch):
     tasks = [{"task": "one", "input": {"value": 1}}]
     code = "import json; print(json.dumps({'ok': True, 'output': {'value': 1}}))"
     sleeps = []
-    monkeypatch.setattr(bench_pair.time, "sleep", lambda seconds: sleeps.append(seconds))
+    monkeypatch.setattr(bench_pair, "_sleep", lambda seconds: sleeps.append(seconds))
     report = run_pair(tasks, adapter(code), adapter(code), repeats=3, repeat_delay=65)
     assert report["status"] == "COMPLETED"
     assert sleeps == [65, 65]
