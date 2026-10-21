@@ -176,14 +176,16 @@ jobs:
           # The preceding live cascade can consume nearly a full provider TPM window.
           # Let the provider's rolling rate-limit window reset before the paired run.
           sleep 65
-          # A/B comparisons use one identical model with no fallback so model tier
-          # differences cannot masquerade as language/runtime improvements. Manual runs
-          # may repeat the paired tasks; push-triggered runs stay at one repeat to limit API spend.
+          # A/B comparisons use one identical model with no fallback. Normal pushes use
+          # one repeat to limit API spend. A single explicitly marked push can request a
+          # one-off repeated trial without requiring the Actions UI or changing repo secrets.
           paired_model="openai/gpt-oss-20b"
           repeats="1"
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             paired_model="${{ inputs.paired_model || 'openai/gpt-oss-20b' }}"
             repeats="${{ inputs.paired_repeats || '3' }}"
+          elif [[ "$GITHUB_EVENT_NAME" == "push" && "${{ contains(github.event.head_commit.message, '[paired-repeats=3]') }}" == "true" ]]; then
+            repeats="3"
           fi
           # Give each adapter the same model twice: if the first generated candidate
           # fails the task validator, retry once without changing model/provider tier.
