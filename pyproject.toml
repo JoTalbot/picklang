@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "picklang"
-version = "0.1.9"
+version = "0.1.10"
 description = "PICK — компактный язык намерений для LLM-агентов + durable-исполнитель с replay, CAS и хэш-цепочкой (DurableWeave)"
 readme = "README.md"
 requires-python = ">=3.11"

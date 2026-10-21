@@ -1,3 +1,15 @@
+# picklang 0.1.10
+
+Patch release focused on stricter benchmark telemetry and report integrity.
+
+- Require finite, non-negative duration telemetry for every paired PICK and classic Python benchmark row.
+- Require repeat counts to be actual positive integers, rejecting booleans, floats, and numeric strings instead of coercing them.
+- Validate each row's repeat metadata as an integer matching the planned repeat.
+- Add regression tests for malformed duration and repeat metadata.
+- Preserve the live Groq cascade and paired benchmark as CI release gates; this release makes no new performance claim beyond the recorded CI run.
+
+---
+
 # picklang 0.1.9
 
 Patch release focused on stricter benchmark report validation.
