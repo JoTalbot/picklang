@@ -81,3 +81,13 @@ def test_unknown_cascade_task_falls_back_to_full_grammar():
     prompt = build_cascade_prompt(task)
     assert GRAMMAR in prompt
     assert "future behavior" in prompt
+
+
+
+def test_saga_prompt_requires_compensation_before_guard_failure():
+    task = task_named("saga_rollback")
+    prompt = build_cascade_prompt(task)
+    assert "! bank.refund(p.tx)" in prompt
+    assert '? p.ok -> fail "declined"' in prompt
+    assert "Не вызывай refund отдельно" in prompt
+    assert make_validator(task)(CASCADE_TASK_EXAMPLES["saga_rollback"])
