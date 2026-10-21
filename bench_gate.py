@@ -50,7 +50,11 @@ def evaluate_report(report):
             return False, f"input integrity failed for {expected_task!r} repeat {expected_repeat}"
         pick_model = pick_row.get("model")
         baseline_model = baseline_row.get("model")
-        if pick_model and baseline_model and pick_model != baseline_model:
+        if not isinstance(pick_model, str) or not pick_model.strip():
+            return False, f"missing model telemetry for PICK {expected_task!r} repeat {expected_repeat}"
+        if not isinstance(baseline_model, str) or not baseline_model.strip():
+            return False, f"missing model telemetry for Python {expected_task!r} repeat {expected_repeat}"
+        if pick_model != baseline_model:
             return False, (
                 f"model mismatch for {expected_task!r} repeat {expected_repeat}: "
                 f"PICK={pick_model!r}, Python={baseline_model!r}"
