@@ -111,7 +111,7 @@ CASCADE_TASK_GUIDES = {
     "multi_step_subscribe": "Создай подписку, передай sub.id во второй вызов, верни оба id.",
     "guard_pass": "Поставь страж, который завершает программу ошибкой, если p.ok ложно.",
     "guard_decline": "Поставь страж; при p.ok=False программа должна завершиться ошибкой.",
-    "saga_rollback": "Добавь компенсацию refund(tx) и страж; отказ банка должен запустить компенсацию.",
+    "saga_rollback": "Первая строка строго > charge(u, amt). Прикрепи ! bank.refund(p.tx) к вызову bank.charge; следующей строкой поставь ? p.ok -> fail \\"declined\\" и только затем out p.tx. Не вызывай refund отдельно и не меняй порядок.",
     "wait_approval": "Обязательно дождись @wait approval до вызова mail.send; при ложном approval упади.",
     "parallel_two": "Вызови left и right параллельно через || и верни оба результата.",
     "budget_stop": "Установи !budget steps<1 перед двумя вызовами tick; бюджет обязан остановить программу.",
