@@ -199,6 +199,7 @@ jobs:
             --baseline-command "env PICK_AB_MODE=classic python bench_live_adapters.py" \
             --timeout 100 \
             --repeats "$repeats" \
+            --repeat-delay 65 \
             --write bench/live_paired_ab.json
           python - <<'PY'
           import json
