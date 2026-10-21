@@ -1,3 +1,15 @@
+# picklang 0.1.9
+
+Patch release focused on stricter benchmark report validation.
+
+- Require the report-level status to be exactly `COMPLETED` before a paired benchmark can pass the release gate.
+- Reject malformed non-object JSON report values with a clear validation error.
+- Add regression tests for missing status, unknown status, and non-object reports.
+
+This patch strengthens release-gate integrity; it does not claim a new live benchmark measurement.
+
+---
+
 # picklang 0.1.8
 
 Patch release focused on trustworthy paired live benchmarks and release-gate integrity.
