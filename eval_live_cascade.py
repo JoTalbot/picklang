@@ -106,7 +106,7 @@ CASCADE_TASK_GUIDES = {
     "charge_tx": "Вызови bank.charge и верни tx.",
     "search_top1": "Верни первый результат через top(1).",
     "double_value": "Вызови dbl(i) и верни результат.",
-    "fields_a": "Верни только поле a через fields(\\"a\\").",
+    "fields_a": 'Верни только поле a через fields("a").',
     "count_results": "Верни количество результатов через count().",
     "multi_step_subscribe": "Создай подписку, передай sub.id во второй вызов, верни оба id.",
     "guard_pass": "Поставь страж, который завершает программу ошибкой, если p.ok ложно.",
