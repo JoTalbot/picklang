@@ -185,8 +185,10 @@ jobs:
             paired_model="${{ inputs.paired_model || 'openai/gpt-oss-20b' }}"
             repeats="${{ inputs.paired_repeats || '3' }}"
           fi
-          export PICK_LIVE_MODEL_TIERS="[[\"$paired_model\"]]"
-          python -c 'import json, os; tiers=json.loads(os.environ["PICK_LIVE_MODEL_TIERS"]); assert tiers == [["'"$paired_model"'"]], tiers'
+          # Give each adapter the same model twice: if the first generated candidate
+          # fails the task validator, retry once without changing model/provider tier.
+          export PICK_LIVE_MODEL_TIERS="[[\"$paired_model\"],[\"$paired_model\"]]"
+          python -c 'import json, os; tiers=json.loads(os.environ["PICK_LIVE_MODEL_TIERS"]); assert tiers == [["'"$paired_model"'"], ["'"$paired_model"'"]], tiers'
           echo "Paired A/B model: $paired_model"
           echo "Paired A/B repeats: $repeats"
           python bench_pair.py \
@@ -276,6 +278,33 @@ jobs:
           PY
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Enforce paired benchmark quality gate
+        if: always()
+        shell: bash
+        run: |
+          if [ ! -f bench/live_paired_ab.json ]; then
+            echo "::error::Paired benchmark report is missing; refusing to publish a release."
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("bench/live_paired_ab.json").read_text(encoding="utf-8"))
+          if report.get("status") == "INCONCLUSIVE_RATE_LIMIT":
+              print("Paired benchmark is inconclusive due to provider rate limiting; cascade tests remain the release signal.")
+              raise SystemExit(0)
+          repeats = int(report.get("repeats", 1))
+          planned = len(report.get("tasks", [])) * repeats
+          pick, baseline = report.get("pick", []), report.get("baseline", [])
+          if len(pick) != planned or len(baseline) != planned:
+              raise SystemExit(f"::error::Incomplete paired report: PICK {len(pick)}/{planned}, Python {len(baseline)}/{planned}")
+          pick_pass = sum(bool(row.get("ok")) for row in pick)
+          baseline_pass = sum(bool(row.get("ok")) for row in baseline)
+          matches = sum(row.get("output_match") is True for row in pick)
+          if pick_pass != planned or baseline_pass != planned or matches != planned:
+              raise SystemExit(f"::error::Paired quality gate failed: PICK {pick_pass}/{planned}, Python {baseline_pass}/{planned}, exact matched outputs {matches}/{planned}")
+          print(f"Paired quality gate passed: {planned}/{planned} tasks succeeded in both adapters with identical outputs.")
+          PY
       - name: Print complete live results in logs
         if: always()
         shell: bash
