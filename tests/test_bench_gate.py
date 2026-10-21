@@ -12,12 +12,14 @@ def report(pick_tokens=80, baseline_tokens=100):
             pick.append({
                 "task": task, "repeat": repeat, "input_digest": f"digest-{task}",
                 "model": "test-model", "ok": True, "output_match": True,
+                "seconds": 0.25,
                 "prompt_tokens": pick_tokens // 2 if index == 0 else 0,
                 "completion_tokens": pick_tokens - pick_tokens // 2 if index == 0 else 0,
             })
             baseline.append({
                 "task": task, "repeat": repeat, "input_digest": f"digest-{task}",
                 "model": "test-model", "ok": True, "output_match": True,
+                "seconds": 0.30,
                 "prompt_tokens": baseline_tokens // 2 if index == 0 else 0,
                 "completion_tokens": baseline_tokens - baseline_tokens // 2 if index == 0 else 0,
             })
