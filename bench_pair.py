@@ -8,6 +8,7 @@ import shlex
 import subprocess
 import sys
 import time
+from time import sleep as _sleep
 from pathlib import Path
 
 
@@ -157,7 +158,7 @@ def run_pair(tasks, pick_command, baseline_command, timeout=60, repeats=1, repea
         # A delay between full rounds lets provider rolling token windows reset.
         # Do not sleep after a rate limit, since all remaining calls are skipped.
         if repeat and repeat_delay and not rate_limit_hit:
-            time.sleep(repeat_delay)
+            _sleep(repeat_delay)
         for index, task in enumerate(tasks):
             if rate_limit_hit:
                 pick_rows.append(skipped_row(task, repeat + 1, stop_reason))
