@@ -160,6 +160,7 @@ def parse(source: str) -> list[Step]:
             else_step = None
             if m.group(4):
                 else_step = parse(m.group(4))[0]
+                else_step.line = lineno  # фрагмент парсится отдельно и иначе получает line=1
             steps.append(Step("wait", lineno, signal=m.group(1), timeout=timeout, else_step=else_step))
             continue
         if line.startswith("for "):
@@ -167,6 +168,7 @@ def parse(source: str) -> list[Step]:
             if not m:
                 raise PickSyntaxError(lineno, raw, "цикл записывается как: for item in items: <шаг одной строкой>")
             body = parse(m.group(3))[0]
+            body.line = lineno  # фрагмент парсится отдельно и иначе получает line=1
             steps.append(Step("loop", lineno, loop_var=m.group(1),
                               expr=_parse_expr(m.group(2), lineno, raw), body=body))
             continue
