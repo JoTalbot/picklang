@@ -132,7 +132,10 @@ def main():
         started = time.monotonic()
         captured = {"output": None}
         if mode == "pick":
-            prompt = GRAMMAR + f"\nФункции хоста: {', '.join(task['tools'])}\nВходные данные: {json.dumps(task['inputs'], ensure_ascii=False)}\nЗадача: {description}\n"
+            # Keep the PICK prompt in the same language and wording as the
+            # canonical live-cascade task; the DSL grammar/examples are Russian.
+            pick_description = task["task"]
+            prompt = GRAMMAR + f"\nФункции хоста: {', '.join(task['tools'])}\nВходные данные: {json.dumps(task['inputs'], ensure_ascii=False)}\nЗадача: {pick_description}\n"
             validator = make_validator(task)
         else:
             prompt = (PYTHON_GRAMMAR + f"\nTask: {description}\nInputs: {json.dumps(task['inputs'], ensure_ascii=False)}\n"
