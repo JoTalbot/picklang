@@ -145,15 +145,19 @@ def summarize_performance(rows, tasks):
     }
 
 
-def run_pair(tasks, pick_command, baseline_command, timeout=60, repeats=1):
+def run_pair(tasks, pick_command, baseline_command, timeout=60, repeats=1, repeat_delay=0):
     if not pick_command or not baseline_command:
         raise ValueError("both adapter commands are required")
-    if timeout <= 0 or repeats < 1:
-        raise ValueError("timeout must be positive and repeats must be at least one")
+    if timeout <= 0 or repeats < 1 or repeat_delay < 0:
+        raise ValueError("timeout and repeats must be positive; repeat delay cannot be negative")
     pick_rows, baseline_rows = [], []
     rate_limit_hit = False
     stop_reason = "skipped because a provider rate limit was detected; no further API calls made"
     for repeat in range(repeats):
+        # A delay between full rounds lets provider rolling token windows reset.
+        # Do not sleep after a rate limit, since all remaining calls are skipped.
+        if repeat and repeat_delay and not rate_limit_hit:
+            time.sleep(repeat_delay)
         for index, task in enumerate(tasks):
             if rate_limit_hit:
                 pick_rows.append(skipped_row(task, repeat + 1, stop_reason))
@@ -226,6 +230,7 @@ def run_pair(tasks, pick_command, baseline_command, timeout=60, repeats=1):
             "Exact output agreement is reported only when both adapters succeed and both provide an output; it is not a semantic-equivalence verdict.",
             "Seconds are measured locally per adapter invocation; provider-side billing may differ.",
             "On provider rate limiting, the benchmark stops issuing calls immediately and marks remaining rows skipped; these rows are not valid task failures.",
+            f"Delay between repeat rounds: {repeat_delay} seconds.",
         ]
     }
 
@@ -237,15 +242,17 @@ def main(argv=None):
     parser.add_argument("--baseline-command", required=True, help="adapter argv, parsed with shell-style quoting; shell is not invoked")
     parser.add_argument("--timeout", type=float, default=60)
     parser.add_argument("--repeats", type=int, default=1)
+    parser.add_argument("--repeat-delay", type=float, default=0,
+                        help="seconds to wait between repeat rounds, useful for provider rate limits")
     parser.add_argument("--write", required=True, help="output JSON file")
     args = parser.parse_args(argv)
     try:
         tasks = load_tasks(args.tasks)
         report = run_pair(tasks, shlex.split(args.pick_command), shlex.split(args.baseline_command),
-                          timeout=args.timeout, repeats=args.repeats)
+                          timeout=args.timeout, repeats=args.repeats, repeat_delay=args.repeat_delay)
         output = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
         Path(args.write).write_text(output, encoding="utf-8")
-        print(f"Wrote {args.write}: {len(tasks)} tasks x {args.repeats} repeats per adapter")
+        print(f"Wrote {args.write}: {len(tasks)} tasks x {args.repeats} repeats per adapter; delay={args.repeat_delay}s")
         print(f"PICK pass: {sum(bool(r['ok']) for r in report['pick'])}/{len(report['pick'])}")
         print(f"Baseline pass: {sum(bool(r['ok']) for r in report['baseline'])}/{len(report['baseline'])}")
         comparison = report["comparison"]
