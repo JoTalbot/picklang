@@ -15,6 +15,8 @@ def evaluate_report(report):
         return False, "invalid repeat count"
     if not isinstance(tasks, list) or not tasks or repeats < 1:
         return False, "invalid task list or repeat count"
+    if any(not isinstance(task, str) or not task for task in tasks) or len(set(tasks)) != len(tasks):
+        return False, "invalid or duplicate task names"
     planned = len(tasks) * repeats
     pick = report.get("pick")
     baseline = report.get("baseline")
@@ -22,6 +24,34 @@ def evaluate_report(report):
         return False, "missing PICK or baseline rows"
     if len(pick) != planned or len(baseline) != planned:
         return False, f"incomplete report: PICK {len(pick)}/{planned}, Python {len(baseline)}/{planned}"
+
+    # A valid aggregate is not enough: verify that each comparison really is the
+    # same task, repeat, and input, and that model telemetry does not contradict
+    # the same-model benchmark contract.
+    for index, (pick_row, baseline_row) in enumerate(zip(pick, baseline)):
+        expected_task = tasks[index % len(tasks)]
+        expected_repeat = index // len(tasks) + 1
+        for adapter, row in (("PICK", pick_row), ("Python", baseline_row)):
+            if not isinstance(row, dict):
+                return False, f"invalid {adapter} row at index {index}"
+            if row.get("task") != expected_task or row.get("repeat") != expected_repeat:
+                return False, (
+                    f"pairing integrity failed at index {index}: expected "
+                    f"{expected_task!r} repeat {expected_repeat}, got "
+                    f"{row.get('task')!r} repeat {row.get('repeat')!r} for {adapter}"
+                )
+        pick_digest = pick_row.get("input_digest")
+        baseline_digest = baseline_row.get("input_digest")
+        if not isinstance(pick_digest, str) or not pick_digest or pick_digest != baseline_digest:
+            return False, f"input integrity failed for {expected_task!r} repeat {expected_repeat}"
+        pick_model = pick_row.get("model")
+        baseline_model = baseline_row.get("model")
+        if pick_model and baseline_model and pick_model != baseline_model:
+            return False, (
+                f"model mismatch for {expected_task!r} repeat {expected_repeat}: "
+                f"PICK={pick_model!r}, Python={baseline_model!r}"
+            )
+
     pick_pass = sum(row.get("ok") is True for row in pick)
     baseline_pass = sum(row.get("ok") is True for row in baseline)
     pick_matches = sum(row.get("output_match") is True for row in pick)
