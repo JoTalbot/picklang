@@ -1,6 +1,11 @@
-# picklang 0.1.4
+# picklang 0.1.5
 
-Patch release focused on parity and release validation.
+Patch release focused on live benchmark reliability and release safety.
+
+- Retry a failed candidate once with the same configured model in paired PICK-vs-Python tests, keeping model choice identical across adapters.
+- Enforce the paired benchmark as a release quality gate: both adapters must pass every task and return identical expected outputs; missing or incomplete reports block publication.
+- Treat detected provider rate limits as inconclusive instead of misclassifying skipped work as task failure; the independent live cascade remains required.
+- Bump the package version so this release is published under a new immutable tag instead of silently reusing the existing v0.1.4 release.
 
 - Fix Temporal generated workflow code so comparison expressions are evaluated, including explicit rejection of unsupported comparison operators.
 - Add a regression test that compiles generated Temporal source and verifies comparison support before the optional SDK integration check.
