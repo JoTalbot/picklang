@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Release gate for the paired PICK-vs-classic benchmark."""
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -71,6 +72,18 @@ def evaluate_report(report):
                         f"invalid token telemetry for {adapter} row {index}: "
                         f"{field} must be a non-negative integer"
                     )
+
+    # Timing is part of the benchmark evidence too. Missing, negative,
+    # boolean, non-numeric, NaN, or infinite durations must not pass the gate.
+    for adapter, rows in (("PICK", pick), ("Python", baseline)):
+        for index, row in enumerate(rows):
+            value = row.get("seconds")
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value < 0):
+                return False, (
+                    f"invalid duration telemetry for {adapter} row {index}: "
+                    "seconds must be a finite non-negative number"
+                )
 
     pick_pass = sum(row.get("ok") is True for row in pick)
     baseline_pass = sum(row.get("ok") is True for row in baseline)
