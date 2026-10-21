@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import operator
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -119,7 +120,8 @@ def _eval(expr, env, registry, hook, trace, state: _State):
     if kind == "cmp":
         _, op, left, right = expr
         a, b = _eval(left, env, registry, hook, trace, state), _eval(right, env, registry, hook, trace, state)
-        return {"==": a == b, "!=": a != b, ">": a > b, "<": a < b, ">=": a >= b, "<=": a <= b}[op]
+        return {"==": operator.eq, "!=": operator.ne, ">": operator.gt,
+                "<": operator.lt, ">=": operator.ge, "<=": operator.le}[op](a, b)
     if kind == "pipe":
         value = _eval(expr[1][0], env, registry, hook, trace, state)
         for stage in expr[1][1:]:
@@ -176,7 +178,18 @@ def _aot_eligible(source: str, activity_hook, capabilities, untrusted) -> bool:
     if any(s.kind in ("wait", "parallel") for s in steps):
         # AOT currently executes parallel branches sequentially; keep interpreter semantics.
         return False
-    return all((s.retries or 0) == 0 and s.effect is None for s in steps)
+
+    def supported(step) -> bool:
+        if (step.retries or 0) != 0 or step.effect is not None:
+            return False
+        if step.kind == "loop":
+            body = step.body
+            return bool(body is not None and body.kind in ("assign", "expr")
+                        and (body.retries or 0) == 0 and body.effect is None
+                        and body.compensation is None)
+        return True
+
+    return all(supported(s) for s in steps)
 
 
 def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None = None,
@@ -187,7 +200,7 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
                 prefer_aot: bool = True):
     """Возвращает (output, env, trace). Бросает WaitingSignal, если сигнала ещё нет."""
     if prefer_aot and _aot_eligible(source, activity_hook, capabilities, untrusted):
-        from .aot import DoneWhenFailed, run_compiled
+        from .aot import DoneWhenFailed, _LanguageError, run_compiled
         trace: list[str] = []
         def _traced(name, fn):
             def call(*args):
@@ -200,8 +213,13 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
             out, env_out = run_compiled(source, traced_registry, env0, signal_provider)
         except DoneWhenFailed as e:
             raise TaskNotDone(str(e)) from e
-        except RuntimeError as e:
+        except (WaitingSignal, AbortExecution, PickRuntimeError):
+            raise
+        except _LanguageError as e:
             raise PickRuntimeError(str(e)) from e
+        except Exception as e:
+            raise PickRuntimeError(
+                f"выполнение сорвалось, компенсаций выполнено: 0; причина: {e}") from e
         return out, env_out, trace
     steps = _parse_cached(source)
     env: dict[str, Any] = dict(inputs or {})

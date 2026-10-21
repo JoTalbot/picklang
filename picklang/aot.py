@@ -27,6 +27,31 @@ def _fused_top_fields(items, n, *names):
     return out
 
 
+class _LanguageError(RuntimeError):
+    """Ошибка семантики PICK в сгенерированном коде (не ошибка функции хоста)."""
+
+
+_UNDEFINED = object()
+
+
+def _defined(value, name):
+    if value is _UNDEFINED:
+        raise _LanguageError(f"переменная не определена: {name}")
+    return value
+
+
+def _field(value, part):
+    return value[part] if isinstance(value, dict) else getattr(value, part)
+
+
+def _run_compensations(compensations):
+    for comp in reversed(compensations):
+        try:
+            comp()
+        except Exception:
+            pass
+
+
 _COMPILE_LOCK = RLock()  # генератор использует временное глобальное состояние
 _FN_INDEX: dict[str, int] = {}
 _VAR_LOCALS: dict[str, str] | None = None  # имя переменной -> локальное имя в сгенерированном коде
@@ -43,17 +68,18 @@ def _gen_expr(expr, env="env", reg="registry") -> str:
     if "lit" in expr:
         return repr(expr["lit"])
     if "var" in expr:
-        if _VAR_LOCALS is not None:
-            return _VAR_LOCALS.get(expr["var"], f"{env}[{expr['var']!r}]")
-        return f"{env}[{expr['var']!r}]"
+        name = expr["var"]
+        if _VAR_LOCALS is not None and name in _VAR_LOCALS:
+            return f"_defined({_VAR_LOCALS[name]}, {name!r})"
+        return f"_defined({env}.get({name!r}, _UNDEFINED), {name!r})"
     if "get" in expr:
         parts = expr["get"].split(".")
         if _VAR_LOCALS is not None and parts[0] in _VAR_LOCALS:
-            code = _VAR_LOCALS[parts[0]]
+            code = f"_defined({_VAR_LOCALS[parts[0]]}, {parts[0]!r})"
         else:
-            code = f"{env}[{parts[0]!r}]"
+            code = f"_defined({env}.get({parts[0]!r}, _UNDEFINED), {parts[0]!r})"
         for part in parts[1:]:
-            code = f"{code}[{part!r}]"
+            code = f"_field({code}, {part!r})"
         return code
     if "map" in expr:
         items = ", ".join(f"{k!r}: {_gen_expr(v, env, reg)}" for k, v in expr["map"])
@@ -128,6 +154,10 @@ def _collect_vars(steps) -> list[str]:
                 walk(s[key])
         if s.get("body") and s["body"].get("expr"):
             walk(s["body"]["expr"])
+        if s.get("body") and s["body"].get("compensation"):
+            walk(s["body"]["compensation"])
+        if s.get("fail"):
+            walk(s["fail"])
         for _tgt, e in s.get("branches") or []:
             walk(e)
         if s.get("compensation"):
@@ -142,6 +172,18 @@ def _generate_python_unlocked(source: str) -> str:
     if unsupported:
         kinds = ", ".join(unsupported)
         raise ValueError(f"AOT does not support {kinds}; use the interpreter via run_program()")
+    unsupported_features = set()
+    for step in ir["steps"]:
+        if step.get("retries") or step.get("effect"):
+            unsupported_features.add("retries/effects")
+        if step["kind"] == "loop":
+            body = step.get("body") or {}
+            if (body.get("kind") not in ("assign", "expr") or body.get("retries")
+                    or body.get("effect") or "compensation" in body):
+                unsupported_features.add("unsupported loop body")
+    if unsupported_features:
+        features = ", ".join(sorted(unsupported_features))
+        raise ValueError(f"AOT does not support {features}; use the interpreter via run_program()")
     var_names = _collect_vars(ir["steps"])
     _VAR_LOCALS = {name: f"_v{i}" for i, name in enumerate(var_names)}
 
@@ -151,6 +193,7 @@ def _generate_python_unlocked(source: str) -> str:
     body_lines = ["    out = None",
                   "    _compensations = []"]
     lines = body_lines
+    done_conditions: list = []
     for step in ir["steps"]:
         kind = step["kind"]
         if kind == "goal":
@@ -162,21 +205,29 @@ def _generate_python_unlocked(source: str) -> str:
             body = step["body"]
             bexpr = body["expr"]
             iterable = _gen_expr(step["expr"])
-            batch_ok = ("call" in bexpr and bexpr["args"] and bexpr["args"][0].get("var") == var
+            batch_ok = (body.get("kind") == "assign" and body.get("target")
+                        and "call" in bexpr and bexpr["args"] and bexpr["args"][0].get("var") == var
                         and not any(_uses_var(a, var) for a in bexpr["args"][1:]))
+
+            body_code = _gen_expr(bexpr)
+            if body.get("target"):
+                body_code = f"{loc(body['target'])} = {body_code}"
+
             if batch_ok:
                 rest = ", ".join(_gen_expr(a) for a in bexpr["args"][1:])
                 suffix = (", " + rest) if rest else ""
                 lines.append(f"    _items = {iterable}")
                 lines.append(f"    _batch = registry.get({bexpr['call'] + '.batch'!r})")
                 lines.append("    if _batch is not None:")
+                lines.append("        _items = list(_items)")
                 lines.append(f"        {loc(body['target'])} = _batch(_items{suffix})")
+                lines.append(f"        {loc(var)} = _items[-1] if _items else None")
                 lines.append("    else:")
                 lines.append(f"        for {loc(var)} in _items:")
-                lines.append(f"            {loc(body['target'])} = {_gen_expr(bexpr)}")
+                lines.append(f"            {body_code}")
             else:
                 lines.append(f"    for {loc(var)} in {iterable}:")
-                lines.append(f"        {loc(body['target'])} = {_gen_expr(bexpr)}")
+                lines.append(f"        {body_code}")
             continue
         if kind == "parallel":
             for target, expr in step["branches"]:
@@ -195,34 +246,42 @@ def _generate_python_unlocked(source: str) -> str:
                 lines.append(f"    _compensations.append(lambda: {_gen_expr(step['compensation'])})")
         elif kind == "guard":
             lines.append(f"    if not ({_gen_expr(step['expr'])}):")
-            lines.append(f"        raise RuntimeError('guard failed')")
+            reason = _gen_expr(step["fail"]) if step.get("fail") else "''"
+            lines.append(f"        raise _LanguageError('guard failed: ' + str({reason}))")
         elif kind == "wait":
             lines.append(f"    _v = signal_provider({step['signal']!r}) if signal_provider else None")
             lines.append("    if _v is None: raise WaitingSignal(%r)" % step["signal"])
             lines.append(f"    {loc(step['signal'])} = _v")
         elif kind == "donewhen":
-            for cond in step["conditions"]:
-                lines.append(f"    if not ({_gen_expr(cond)}): raise DoneWhenFailed('done when не выполнен')")
+            done_conditions = step["conditions"]
         elif kind == "out":
             lines.append(f"    out = {_gen_expr(step['expr'])}")
+    for cond in done_conditions:
+        lines.append(f"    if not ({_gen_expr(cond)}): raise DoneWhenFailed('критерии готовности (done when) не выполнены')")
     for name in var_names:
-        lines.append(f"    env[{name!r}] = {loc(name)}")
+        lines.append(f"    if {loc(name)} is not _UNDEFINED: env[{name!r}] = {loc(name)}")
     lines.append("    return out")
     header = ["def _pick_program(env, registry, signal_provider=None):",
-              "    from picklang.interpreter import WaitingSignal",
+              "    from picklang.interpreter import AbortExecution, WaitingSignal",
               "    _fn = [registry.get(_n) for _n in _FN_NAMES]"]
-    header += [f"    {loc(n)} = env.get({n!r})" for n in var_names]
+    goal_params = next((s.get("params") or [] for s in ir["steps"] if s["kind"] == "goal"), [])
+    if goal_params:
+        header.append(f"    _missing_params = [name for name in {tuple(goal_params)!r} if name not in env]")
+        header.append("    if _missing_params: raise _LanguageError('не переданы параметры цели: ' + ', '.join(_missing_params))")
+    header += [f"    {loc(n)} = env.get({n!r}, _UNDEFINED)" for n in var_names]
     _VAR_LOCALS = None
     if any("compensation" in s for s in ir["steps"]):
         # сага: при бизнес-ошибке компенсации в обратном порядке, затем проброс
         wrapped = header + ["    try:"]
         wrapped += ["    " + ln if ln.strip() else ln for ln in lines]
-        wrapped += ["    except WaitingSignal:",
-                    "        raise  # ожидание — не бизнес-ошибка: компенсации не запускаем",
+        wrapped += ["    except (WaitingSignal, AbortExecution):",
+                    "        raise  # ожидание/аборт — не бизнес-ошибка: компенсации не запускаем",
+                    "    except (DoneWhenFailed, _LanguageError):",
+                    "        _run_compensations(_compensations)",
+                    "        raise",
                     "    except Exception as _e:",
-                    "        for _comp in reversed(_compensations):",
-                    "            _comp()",
-                    "        raise RuntimeError(str(_e) + f'; компенсаций выполнено: {len(_compensations)}') from _e"]
+                    "        _run_compensations(_compensations)",
+                    "        raise _LanguageError(f'выполнение сорвалось, компенсаций выполнено: {len(_compensations)}; причина: {_e}') from _e"]
         return "\n".join(wrapped) + "\n"
     return "\n".join(header + lines) + "\n"
 
@@ -241,7 +300,15 @@ def generate_python(source: str) -> str:
 def _compiled_source(source: str):
     """Кэш по тексту; сборка кода и индекса функций атомарны между потоками."""
     with _COMPILE_LOCK:
-        ns: dict[str, Any] = {"_fused_top_fields": _fused_top_fields, "DoneWhenFailed": DoneWhenFailed}
+        ns: dict[str, Any] = {
+            "_fused_top_fields": _fused_top_fields,
+            "DoneWhenFailed": DoneWhenFailed,
+            "_LanguageError": _LanguageError,
+            "_UNDEFINED": _UNDEFINED,
+            "_defined": _defined,
+            "_field": _field,
+            "_run_compensations": _run_compensations,
+        }
         _FN_INDEX.clear()
         code = generate_python(source)
         ns["_FN_NAMES"] = [name for name, _ in sorted(_FN_INDEX.items(), key=lambda kv: kv[1])]
