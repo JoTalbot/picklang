@@ -42,6 +42,17 @@ def compile_ir(source: str) -> dict[str, Any]:
         if s.retries: item["retries"] = s.retries
         if s.effect: item["effect"] = s.effect
         if s.signal: item["signal"] = s.signal
+        if s.timeout is not None: item["timeout"] = s.timeout
+        if s.else_step is not None:
+            alt = s.else_step
+            else_item: dict[str, Any] = {"kind": alt.kind, "line": alt.line}
+            if alt.target and alt.kind == "assign": else_item["target"] = alt.target
+            if alt.retries: else_item["retries"] = alt.retries
+            if alt.effect: else_item["effect"] = alt.effect
+            if alt.expr is not None: else_item["expr"] = _expr_ir(alt.expr)
+            if alt.compensation is not None:
+                else_item["compensation"] = _expr_ir(alt.compensation)
+            item["else_step"] = else_item
         if s.budget: item["budget"] = s.budget
         if s.branches: item["branches"] = [[tgt, _expr_ir(e)] for tgt, e in s.branches]
         if s.kind == "loop":
