@@ -26,6 +26,35 @@ def test_same_inputs_are_sent_to_both_adapters_and_order_alternates(tmp_path):
         r["input_digest"] for r in report["baseline"]
     }
     assert [r["repeat"] for r in report["pick"]] == [1, 1, 2, 2]
+    assert all(row["output_match"] is True for row in report["pick"] + report["baseline"])
+    assert report["comparison"]["paired_successes"] == 4
+    assert report["comparison"]["output_comparable"] == 4
+    assert report["comparison"]["exact_output_matches"] == 4
+    assert report["comparison"]["exact_output_match_rate"] == 1.0
+
+
+def test_output_mismatch_is_reported_without_claiming_semantic_failure():
+    tasks = [{"task": "different", "input": {"value": 1}}]
+    pick = adapter("import json; print(json.dumps({'ok': True, 'output': {'value': 1}}))")
+    baseline = adapter("import json; print(json.dumps({'ok': True, 'output': {'value': 2}}))")
+    report = run_pair(tasks, pick, baseline)
+    assert report["pick"][0]["ok"] is True
+    assert report["baseline"][0]["ok"] is True
+    assert report["pick"][0]["output_match"] is False
+    assert report["baseline"][0]["output_match"] is False
+    assert report["comparison"]["exact_output_matches"] == 0
+    assert report["comparison"]["exact_output_match_rate"] == 0.0
+    assert "not proof" in report["comparison"]["note"]
+
+
+def test_output_comparison_is_unknown_when_adapter_omits_output():
+    tasks = [{"task": "no-output", "input": {}}]
+    code = "import json; print(json.dumps({'ok': True}))"
+    report = run_pair(tasks, adapter(code), adapter(code))
+    assert report["pick"][0]["output_match"] is None
+    assert report["baseline"][0]["output_match"] is None
+    assert report["comparison"]["output_comparable"] == 0
+    assert report["comparison"]["exact_output_match_rate"] is None
 
 
 def test_timeout_is_a_failed_row():
@@ -57,6 +86,7 @@ def test_invalid_adapter_output_is_failed_not_crash():
     )
     assert report["pick"][0]["ok"] is False
     assert "not one JSON object" in report["pick"][0]["error"]
+    assert report["pick"][0]["output_match"] is None
 
 
 def test_load_tasks_rejects_duplicate_names(tmp_path):
@@ -67,7 +97,6 @@ def test_load_tasks_rejects_duplicate_names(tmp_path):
     ]), encoding="utf-8")
     with pytest.raises(ValueError, match="duplicate"):
         load_tasks(path)
-
 
 
 def test_provider_rate_limit_stops_all_remaining_calls(tmp_path):
@@ -93,3 +122,5 @@ def test_provider_rate_limit_stops_all_remaining_calls(tmp_path):
     assert report["baseline"][0]["skipped"] is True
     assert all(row.get("skipped") for row in report["pick"][1:] + report["baseline"][1:])
     assert not marker.exists()
+    assert report["comparison"]["output_comparable"] == 0
+    assert report["comparison"]["exact_output_match_rate"] is None
