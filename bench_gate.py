@@ -14,11 +14,10 @@ def evaluate_report(report):
     if report.get("status") != "COMPLETED":
         return False, f"invalid report status: expected COMPLETED, got {report.get('status')!r}"
     tasks = report.get("tasks")
-    try:
-        repeats = int(report.get("repeats", 1))
-    except (TypeError, ValueError):
-        return False, "invalid repeat count"
-    if not isinstance(tasks, list) or not tasks or repeats < 1:
+    repeats = report.get("repeats", 1)
+    if isinstance(repeats, bool) or not isinstance(repeats, int) or repeats < 1:
+        return False, "invalid repeat count: expected a positive integer"
+    if not isinstance(tasks, list) or not tasks:
         return False, "invalid task list or repeat count"
     if any(not isinstance(task, str) or not task for task in tasks) or len(set(tasks)) != len(tasks):
         return False, "invalid or duplicate task names"
@@ -39,7 +38,9 @@ def evaluate_report(report):
         for adapter, row in (("PICK", pick_row), ("Python", baseline_row)):
             if not isinstance(row, dict):
                 return False, f"invalid {adapter} row at index {index}"
-            if row.get("task") != expected_task or row.get("repeat") != expected_repeat:
+            row_repeat = row.get("repeat")
+            if (row.get("task") != expected_task or isinstance(row_repeat, bool)
+                    or not isinstance(row_repeat, int) or row_repeat != expected_repeat):
                 return False, (
                     f"pairing integrity failed at index {index}: expected "
                     f"{expected_task!r} repeat {expected_repeat}, got "
