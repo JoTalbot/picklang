@@ -173,3 +173,21 @@ def test_gate_rejects_missing_or_invalid_duration_telemetry():
     passed, message = evaluate_report(candidate)
     assert passed is False
     assert "invalid duration telemetry" in message
+
+
+def test_gate_rejects_non_integer_or_boolean_repeat_counts():
+    for invalid in (True, False, 1.0, "1", "2", 0, -1, None):
+        candidate = report()
+        candidate["repeats"] = invalid
+        passed, message = evaluate_report(candidate)
+        assert passed is False
+        assert "invalid repeat count" in message
+
+
+def test_gate_rejects_boolean_or_non_integer_row_repeat_values():
+    for invalid in (True, 1.0, "1", None):
+        candidate = report()
+        candidate["pick"][0]["repeat"] = invalid
+        passed, message = evaluate_report(candidate)
+        assert passed is False
+        assert "pairing integrity failed" in message
