@@ -9,12 +9,12 @@ Patch release focused on live benchmark reliability and release safety.
 
 - Fix Temporal generated workflow code so comparison expressions are evaluated, including explicit rejection of unsupported comparison operators.
 - Add a regression test that compiles generated Temporal source and verifies comparison support before the optional SDK integration check.
-- Make the live-task grammar explicit again, include a short canonical example, and print bounded rejected-response diagnostics directly in Actions logs to catch prompt regressions.
+- Keep the shared live-task grammar below the 240-token budget; attach task-specific few-shot examples only to tasks that need them, and print bounded rejected-response diagnostics directly in Actions logs.
 - Clarify that the live signal-wait task must contain an explicit `@wait approval` step; a plain guard is not a durable wait.
 - Keep the release gate tied to the exact main commit: unit tests, package build and smoke checks, and all six live Groq cascade tasks must pass.
 - Preserve transparent paired A/B results in workflow logs and Job Summary; a single live sample is evidence for that run only, not a general performance guarantee.
 
-A previous six-task smoke run passed 6/6, with 4/6 solved on tier-0; the expanded twelve-task release gate must pass on the exact release commit before publication. The paired one-repeat benchmark recorded PICK 6/6 and classic Python 5/6 on the same model; it is a small sample and does not establish a general speed or cost advantage. Live evaluation consumes provider quota.
+Latest observed live run (2026-10-21): the independent Groq cascade passed 12/12 tasks, while the same-model paired benchmark passed PICK 4/6 and classic Python 6/6. The release gate correctly blocked publication. The paired sample is small and does not establish a general speed or cost advantage; live evaluation consumes provider quota.
 
 ---
 

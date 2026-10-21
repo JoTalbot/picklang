@@ -25,6 +25,15 @@ def solve(u):
     message = mail.send(u, sub["id"])
     return {"sub": sub["id"], "message": message["id"]}
 """
+PICK_TASK_EXAMPLES = {
+    "search_top1": """> search(q)
+results = web.search(q) >> top(1)
+out results""",
+    "multi_step_subscribe": """> notify(u)
+sub = db.create_sub(u)
+msg = mail.send(u, sub.id)
+out {sub: sub.id, message: msg.id}""",
+}
 ALLOWED_AST = {ast.Module, ast.FunctionDef, ast.arguments, ast.arg, ast.Return,
     ast.Assign, ast.Expr, ast.Call, ast.Name, ast.Load, ast.Store, ast.Constant,
     ast.Dict, ast.List, ast.Tuple, ast.Subscript, ast.Slice, ast.BinOp, ast.Mult, ast.Add,
@@ -132,7 +141,12 @@ def main():
         started = time.monotonic()
         captured = {"output": None}
         if mode == "pick":
-            prompt = GRAMMAR + f"\nФункции хоста: {', '.join(task['tools'])}\nВходные данные: {json.dumps(task['inputs'], ensure_ascii=False)}\nЗадача: {description}\n"
+            # Keep the PICK prompt in the same language and wording as the
+            # canonical live-cascade task; the DSL grammar/examples are Russian.
+            pick_description = task["task"]
+            example = PICK_TASK_EXAMPLES.get(task_name)
+            example_text = f"\nПример для похожей задачи:\n{example}\n" if example else ""
+            prompt = GRAMMAR + example_text + f"\nФункции хоста: {', '.join(task['tools'])}\nВходные данные: {json.dumps(task['inputs'], ensure_ascii=False)}\nЗадача: {pick_description}\n"
             validator = make_validator(task)
         else:
             prompt = (PYTHON_GRAMMAR + f"\nTask: {description}\nInputs: {json.dumps(task['inputs'], ensure_ascii=False)}\n"
