@@ -122,3 +122,18 @@ def test_gate_rejects_non_object_report():
     passed, message = evaluate_report([])
     assert passed is False
     assert "expected a JSON object" in message
+
+
+def test_gate_rejects_missing_or_invalid_per_row_token_telemetry():
+    candidate = report()
+    candidate["pick"][0].pop("prompt_tokens")
+    passed, message = evaluate_report(candidate)
+    assert passed is False
+    assert "invalid token telemetry" in message
+
+    for invalid in (-1, "12", True, 1.5, None):
+        candidate = report()
+        candidate["baseline"][0]["completion_tokens"] = invalid
+        passed, message = evaluate_report(candidate)
+        assert passed is False
+        assert "non-negative integer" in message
