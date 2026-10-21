@@ -56,6 +56,18 @@ def evaluate_report(report):
                 f"PICK={pick_model!r}, Python={baseline_model!r}"
             )
 
+    # Token usage is a per-invocation contract: reject missing, negative,
+    # boolean, or non-integer telemetry instead of silently treating it as zero.
+    for adapter, rows in (("PICK", pick), ("Python", baseline)):
+        for index, row in enumerate(rows):
+            for field in ("prompt_tokens", "completion_tokens"):
+                value = row.get(field)
+                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                    return False, (
+                        f"invalid token telemetry for {adapter} row {index}: "
+                        f"{field} must be a non-negative integer"
+                    )
+
     pick_pass = sum(row.get("ok") is True for row in pick)
     baseline_pass = sum(row.get("ok") is True for row in baseline)
     pick_matches = sum(row.get("output_match") is True for row in pick)
