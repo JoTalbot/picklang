@@ -72,14 +72,9 @@ class Vocabulary:
         # Переименовываем только внутренние временные — они и давали коллизии.
         export = locals_[-1] if locals_ else None
         mapping = {name: f"{name}__{alias}{occurrence}" for name in locals_ if name != export}
-        def repl(m):
-            name, prefix = m.group(0), ""
-            return mapping.get(name, name)
         out = []
         for line in body.splitlines():
             # переименовываем только корни идентификаторов (не поля после точки, не строки)
-            parts, quote, cur = [], None, ""
-            i = 0
             tokens = _re.split(r'("[^"]*")', line)
             done = []
             for tok in tokens:
