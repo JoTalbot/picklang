@@ -12,12 +12,14 @@ def report(pick_tokens=80, baseline_tokens=100):
             pick.append({
                 "task": task, "repeat": repeat, "input_digest": f"digest-{task}",
                 "model": "test-model", "ok": True, "output_match": True,
+                "seconds": 0.25,
                 "prompt_tokens": pick_tokens // 2 if index == 0 else 0,
                 "completion_tokens": pick_tokens - pick_tokens // 2 if index == 0 else 0,
             })
             baseline.append({
                 "task": task, "repeat": repeat, "input_digest": f"digest-{task}",
                 "model": "test-model", "ok": True, "output_match": True,
+                "seconds": 0.30,
                 "prompt_tokens": baseline_tokens // 2 if index == 0 else 0,
                 "completion_tokens": baseline_tokens - baseline_tokens // 2 if index == 0 else 0,
             })
@@ -156,3 +158,18 @@ def test_gate_rejects_model_mismatch_even_when_one_model_is_missing():
     passed, message = evaluate_report(candidate)
     assert passed is False
     assert "missing model telemetry" in message
+
+
+def test_gate_rejects_missing_or_invalid_duration_telemetry():
+    for invalid in (None, -0.01, "0.2", True, float("nan"), float("inf")):
+        candidate = report()
+        candidate["pick"][0]["seconds"] = invalid
+        passed, message = evaluate_report(candidate)
+        assert passed is False
+        assert "invalid duration telemetry" in message
+
+    candidate = report()
+    candidate["baseline"][0].pop("seconds")
+    passed, message = evaluate_report(candidate)
+    assert passed is False
+    assert "invalid duration telemetry" in message
