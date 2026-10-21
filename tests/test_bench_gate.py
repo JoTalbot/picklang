@@ -156,3 +156,18 @@ def test_gate_rejects_model_mismatch_even_when_one_model_is_missing():
     passed, message = evaluate_report(candidate)
     assert passed is False
     assert "missing model telemetry" in message
+
+
+def test_gate_rejects_missing_or_invalid_duration_telemetry():
+    for invalid in (None, -0.01, "0.2", True, float("nan"), float("inf")):
+        candidate = report()
+        candidate["pick"][0]["seconds"] = invalid
+        passed, message = evaluate_report(candidate)
+        assert passed is False
+        assert "invalid duration telemetry" in message
+
+    candidate = report()
+    candidate["baseline"][0].pop("seconds")
+    passed, message = evaluate_report(candidate)
+    assert passed is False
+    assert "invalid duration telemetry" in message
