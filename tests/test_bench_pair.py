@@ -33,6 +33,28 @@ def test_same_inputs_are_sent_to_both_adapters_and_order_alternates(tmp_path):
     assert report["comparison"]["exact_output_match_rate"] == 1.0
 
 
+
+def test_repeated_runs_report_medians_and_token_totals():
+    tasks = [{"task": "telemetry", "input": {"value": 1}}]
+    code = (
+        "import json; print(json.dumps({'ok': True, 'output': {'value': 1}, "
+        "'prompt_tokens': 10, 'completion_tokens': 2, 'attempts': 1}))"
+    )
+    report = run_pair(tasks, adapter(code), adapter(code), repeats=3)
+    summary = report["performance_summary"]
+    assert summary["pick"]["successful_runs"] == 3
+    assert summary["baseline"]["successful_runs"] == 3
+    assert summary["pick"]["total_reported_tokens"] == 36
+    assert summary["baseline"]["total_reported_tokens"] == 36
+    assert summary["pick"]["median_prompt_tokens"] == 10
+    assert summary["pick"]["median_completion_tokens"] == 2
+    assert summary["pick"]["median_attempts"] == 1
+    assert summary["pick"]["per_task"][0]["successful_runs"] == 3
+    assert isinstance(summary["pick"]["median_seconds"], (int, float))
+    assert "successful" in summary["pick"]["note"]
+
+
+
 def test_output_mismatch_is_reported_without_claiming_semantic_failure():
     tasks = [{"task": "different", "input": {"value": 1}}]
     pick = adapter("import json; print(json.dumps({'ok': True, 'output': {'value': 1}}))")

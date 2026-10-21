@@ -94,6 +94,57 @@ def skipped_row(task, repeat, reason):
     }
 
 
+def median(values):
+    """Return the median of numeric values, or None when no measurements exist."""
+    values = sorted(values)
+    if not values:
+        return None
+    middle = len(values) // 2
+    if len(values) % 2:
+        return values[middle]
+    return round((values[middle - 1] + values[middle]) / 2, 6)
+
+
+def summarize_performance(rows, tasks):
+    """Summarize repeated measurements without counting skipped/failed calls as latency wins."""
+    successful = [row for row in rows if row.get("ok") and not row.get("skipped")]
+    task_summaries = []
+    for task in tasks:
+        task_rows = [row for row in successful if row.get("task") == task["task"]]
+        item = {
+            "task": task["task"],
+            "successful_runs": len(task_rows),
+            "median_seconds": median([row["seconds"] for row in task_rows if isinstance(row.get("seconds"), (int, float))]),
+        }
+        for field in ("prompt_tokens", "completion_tokens", "attempts"):
+            vals = [row[field] for row in task_rows if isinstance(row.get(field), (int, float))]
+            item["median_" + field] = median(vals)
+        item["total_reported_tokens"] = sum(
+            row.get("prompt_tokens", 0) + row.get("completion_tokens", 0)
+            for row in task_rows
+            if isinstance(row.get("prompt_tokens", 0), (int, float))
+            and isinstance(row.get("completion_tokens", 0), (int, float))
+        )
+        task_summaries.append(item)
+    total_tokens = sum(
+        row.get("prompt_tokens", 0) + row.get("completion_tokens", 0)
+        for row in successful
+        if isinstance(row.get("prompt_tokens", 0), (int, float))
+        and isinstance(row.get("completion_tokens", 0), (int, float))
+    )
+    return {
+        "successful_runs": len(successful),
+        "median_seconds": median([row["seconds"] for row in successful if isinstance(row.get("seconds"), (int, float))]),
+        "total_successful_seconds": round(sum(row.get("seconds", 0) for row in successful), 6),
+        "total_reported_tokens": total_tokens,
+        "median_prompt_tokens": median([row["prompt_tokens"] for row in successful if isinstance(row.get("prompt_tokens"), (int, float))]),
+        "median_completion_tokens": median([row["completion_tokens"] for row in successful if isinstance(row.get("completion_tokens"), (int, float))]),
+        "median_attempts": median([row["attempts"] for row in successful if isinstance(row.get("attempts"), (int, float))]),
+        "per_task": task_summaries,
+        "note": "Medians use successful, non-skipped invocations only; token totals include rows with reported prompt and completion token counts.",
+    }
+
+
 def run_pair(tasks, pick_command, baseline_command, timeout=60, repeats=1):
     if not pick_command or not baseline_command:
         raise ValueError("both adapter commands are required")
@@ -162,6 +213,10 @@ def run_pair(tasks, pick_command, baseline_command, timeout=60, repeats=1):
             "exact_output_matches": matches,
             "exact_output_match_rate": matches / len(comparable) if comparable else None,
             "note": "Exact structural output equality is a regression signal, not proof of semantic equivalence."
+        },
+        "performance_summary": {
+            "pick": summarize_performance(pick_rows, tasks),
+            "baseline": summarize_performance(baseline_rows, tasks),
         },
         "pick": pick_rows,
         "baseline": baseline_rows,
