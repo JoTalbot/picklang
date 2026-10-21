@@ -137,3 +137,22 @@ def test_gate_rejects_missing_or_invalid_per_row_token_telemetry():
         passed, message = evaluate_report(candidate)
         assert passed is False
         assert "non-negative integer" in message
+
+
+def test_gate_rejects_missing_or_blank_model_telemetry():
+    for adapter in ("pick", "baseline"):
+        for invalid in (None, "", "   ", 123):
+            candidate = report()
+            candidate[adapter][0]["model"] = invalid
+            passed, message = evaluate_report(candidate)
+            assert passed is False
+            assert "missing model telemetry" in message
+
+
+def test_gate_rejects_model_mismatch_even_when_one_model_is_missing():
+    candidate = report()
+    candidate["pick"][0]["model"] = ""
+    candidate["baseline"][0]["model"] = "test-model"
+    passed, message = evaluate_report(candidate)
+    assert passed is False
+    assert "missing model telemetry" in message
