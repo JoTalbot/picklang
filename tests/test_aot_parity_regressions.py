@@ -10,9 +10,10 @@ from types import SimpleNamespace
 import pytest
 
 from picklang import run_program
-from picklang.aot import generate_python
+from picklang.aot import generate_python, run_compiled
 from picklang.interpreter import _aot_eligible
 from picklang.ir import compile_ir, program_digest
+from picklang.stdlib import with_stdlib
 
 
 def both(source, registry_factory, inputs):
@@ -184,3 +185,91 @@ def test_failed_compensation_neither_masks_error_nor_stops_rollback():
     result = both(src, factory, {"x": 1})
     assert result[1:3] == ("PickRuntimeError", "guard failed: stop")
     assert result[3] == [("charge", 1), ("charge", 2), ("bad-refund", 2), ("refund", 1)]
+
+
+def _ship_factory(calls):
+    def ship(i, *rest):
+        calls.append(("ship", i, rest))
+        return (i, rest)
+
+    def batch(xs, *rest):
+        calls.append(("batch", list(xs), rest))
+        return [("batch", list(xs), rest)]
+
+    return {"ship": ship, "ship.batch": batch}
+
+
+def test_batch_is_only_used_for_elementwise_loop_bodies():
+    # ship(10) и ship(i, i) — не поэлементная форма: batch изменил бы смысл.
+    for src in ("> t(xs)\nfor i in xs: y = ship(10)\nout y\n",
+                "> t(xs)\nfor i in xs: y = ship(i, i)\nout y\n"):
+        result = both(src, _ship_factory, {"xs": [1, 2], "i": 99})
+        assert all(call[0] == "ship" for call in result[2])
+
+
+def test_batch_materializes_generator_once():
+    src = "> t(xs)\nfor i in xs: y = ship(i)\nout {y: y, i: i}\n"
+    results = []
+    for prefer_aot in (False, True):
+        calls = []
+        out, env, _trace = run_program(
+            src, _ship_factory(calls), {"xs": (v for v in [1, 2])}, prefer_aot=prefer_aot)
+        results.append((out, env["y"], env["i"], calls))
+    assert results[0] == results[1]
+    assert results[0][3] == [("batch", [1, 2], ())]
+
+
+def test_unknown_function_error_matches():
+    result = both("> t(x)\ny = nope(x)\nout y\n", lambda calls: {}, {"x": 1})
+    assert result[1:3] == ("PickRuntimeError", "функция не зарегистрирована хостом: nope")
+
+
+def test_custom_top_fields_are_not_bypassed_by_fusion():
+    def factory(calls):
+        return with_stdlib({
+            "rowsfn": lambda x: [{"v": x}, {"v": x + 1}],
+            "top": lambda items, n=3: list(items)[-int(n):],
+            "fields": lambda item, *names: [{"custom": 1}],
+        })
+
+    src = "> t(x)\ny = rowsfn(x) >> top(1) >> fields(\"v\")\nout y\n"
+    assert both(src, factory, {"x": 1})[1][0] == [{"custom": 1}]
+    with pytest.raises(ValueError, match="requires stdlib top/fields"):
+        run_compiled(src, factory([]), {"x": 1})
+
+
+def test_done_condition_error_compensates_and_wraps():
+    def factory(calls):
+        def badcheck(x):
+            calls.append("badcheck")
+            raise ValueError("check boom")
+
+        return {
+            "inc": lambda x: x + 1,
+            "badcheck": badcheck,
+            "bank.charge": lambda x: calls.append("charge") or {"tx": x},
+            "bank.refund": lambda tx: calls.append("refund"),
+        }
+
+    plain = both("> t(x)\ny = inc(x)\ndone when: badcheck(y)\nout y\n",
+                 factory, {"x": 3})
+    assert plain[1] == "PickRuntimeError"
+    assert "причина: check boom" in plain[2]
+
+    saga = both("> t(x)\np = bank.charge(x) ! bank.refund(p.tx)\n"
+                "done when: badcheck(x)\nout p\n", factory, {"x": 3})
+    assert saga[1] == "PickRuntimeError"
+    assert saga[3] == ["charge", "badcheck", "refund"]
+
+
+def test_wait_timeout_else_preserved_in_ir_and_aot_fails_closed():
+    src = "> t(x)\n@wait approval :5s else notify(x)\nout x\n"
+    step = compile_ir(src)["steps"][1]
+    assert step["timeout"] == 5
+    assert step["else_step"]["kind"] == "expr"
+    with pytest.raises(ValueError, match="wait timeout/else"):
+        generate_python(src)
+
+    result = both(src, lambda calls: {"notify": lambda x: calls.append(x) or x}, {"x": 1})
+    assert result[1][0] == 1
+    assert result[2] == [1]

@@ -52,6 +52,16 @@ def _run_compensations(compensations):
             pass
 
 
+def _checked_fn(name, fn):
+    if fn is not None:
+        return fn
+
+    def _missing(*args):
+        raise _LanguageError(f"функция не зарегистрирована хостом: {name}")
+
+    return _missing
+
+
 _COMPILE_LOCK = RLock()  # генератор использует временное глобальное состояние
 _FN_INDEX: dict[str, int] = {}
 _VAR_LOCALS: dict[str, str] | None = None  # имя переменной -> локальное имя в сгенерированном коде
@@ -105,6 +115,31 @@ def _gen_expr(expr, env="env", reg="registry") -> str:
         args = ", ".join(_gen_expr(a, env, reg) for a in expr["args"])
         return f"{_fn_ref(expr['call'])}({args})"
     raise ValueError(f"unsupported expr: {expr}")
+
+
+def _contains_fused_top_fields(node) -> bool:
+    if isinstance(node, dict):
+        stages = node.get("pipe")
+        if (isinstance(stages, list) and len(stages) == 3
+                and isinstance(stages[1], dict) and stages[1].get("call") == "top"
+                and isinstance(stages[2], dict) and stages[2].get("call") == "fields"):
+            return True
+        return any(_contains_fused_top_fields(v) for v in node.values())
+    if isinstance(node, list):
+        return any(_contains_fused_top_fields(v) for v in node)
+    return False
+
+
+@lru_cache(maxsize=128)
+def _source_has_fused_top_fields(source: str) -> bool:
+    return _contains_fused_top_fields(compile_ir(source))
+
+
+def _registry_supports_fused_pipes(source: str, registry: dict) -> bool:
+    """Слияние top>>fields повторяет семантику stdlib, а не произвольного реестра."""
+    if not _source_has_fused_top_fields(source):
+        return True
+    return registry.get("top") is _top and registry.get("fields") is _fields
 
 
 def _uses_var(expr, var) -> bool:
@@ -181,6 +216,8 @@ def _generate_python_unlocked(source: str) -> str:
             if (body.get("kind") not in ("assign", "expr") or body.get("retries")
                     or body.get("effect") or "compensation" in body):
                 unsupported_features.add("unsupported loop body")
+        if step["kind"] == "wait" and ("timeout" in step or "else_step" in step):
+            unsupported_features.add("wait timeout/else")
     if unsupported_features:
         features = ", ".join(sorted(unsupported_features))
         raise ValueError(f"AOT does not support {features}; use the interpreter via run_program()")
@@ -263,7 +300,7 @@ def _generate_python_unlocked(source: str) -> str:
     lines.append("    return out")
     header = ["def _pick_program(env, registry, signal_provider=None):",
               "    from picklang.interpreter import AbortExecution, WaitingSignal",
-              "    _fn = [registry.get(_n) for _n in _FN_NAMES]"]
+              "    _fn = [_checked_fn(_n, registry.get(_n)) for _n in _FN_NAMES]"]
     goal_params = next((s.get("params") or [] for s in ir["steps"] if s["kind"] == "goal"), [])
     if goal_params:
         header.append(f"    _missing_params = [name for name in {tuple(goal_params)!r} if name not in env]")
@@ -308,6 +345,7 @@ def _compiled_source(source: str):
             "_defined": _defined,
             "_field": _field,
             "_run_compensations": _run_compensations,
+            "_checked_fn": _checked_fn,
         }
         _FN_INDEX.clear()
         code = generate_python(source)
@@ -320,8 +358,16 @@ def compile_program(source: str) -> Callable:
     return _compiled_source(source)
 
 
-def run_compiled(source: str, registry: dict, inputs: dict | None = None, signal_provider=None):
+def _run_compiled_unchecked(source: str, registry: dict, inputs: dict | None = None, signal_provider=None):
+    """Execution path for run_program, which checks the *original* registry
+    before wrapping it for tracing (wrappers would defeat identity checks)."""
     fn = compile_program(source)
     env = dict(inputs or {})
     out = fn(env, registry, signal_provider)
     return out, env
+
+
+def run_compiled(source: str, registry: dict, inputs: dict | None = None, signal_provider=None):
+    if not _registry_supports_fused_pipes(source, registry):
+        raise ValueError("AOT fused top>>fields requires stdlib top/fields; use the interpreter via run_program()")
+    return _run_compiled_unchecked(source, registry, inputs, signal_provider)
