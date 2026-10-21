@@ -1,3 +1,16 @@
+# picklang 0.1.8
+
+Patch release focused on trustworthy paired live benchmarks and release-gate integrity.
+
+- Validate that every planned task and repeat is present exactly once for both PICK and classic Python adapters.
+- Reject task/repeat ordering mismatches, differing or missing input digests, contradictory model telemetry, incomplete/rate-limited reports, failed tasks, output mismatches, missing token telemetry, and runs without token savings.
+- Add regression coverage for benchmark pairing and input-integrity failures.
+- Keep the 12-task live Groq cascade as an independent correctness gate and print live benchmark results directly in Actions logs and job summary.
+
+Verified on 2026-10-21 on the trusted self-hosted ARM64 runner: the live Groq cascade passed 12/12 tasks at tier-0 in 12 attempts, using 3,446 reported tokens and 5.4 seconds summed task duration. The paired same-model benchmark passed 6/6 tasks for each adapter with exact output matches; PICK used 1,724 reported tokens versus 2,105 for classic Python, saving 381 tokens (18.1%). This is one live sample on a small fixture, not a universal cost or latency guarantee.
+
+---
+
 # picklang 0.1.7
 
 Patch release focused on lower live-generation overhead and fewer fallback calls.
