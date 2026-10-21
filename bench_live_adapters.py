@@ -34,9 +34,21 @@ PICK_TASK_GUIDES = {
     "multi_step_subscribe": "Вызови инструменты последовательно; второй вызов использует sub.id.",
 }
 PICK_TASK_EXAMPLES = {
+    "charge_tx": """> charge(u)
+p = bank.charge(u, 5)
+out p.tx""",
     "search_top1": """> search(q)
 results = web.search(q) >> top(1)
 out results""",
+    "double_value": """> double(i)
+v = dbl(i)
+out v""",
+    "fields_a": """> get(x)
+v = d.get(x) >> fields("a")
+out v""",
+    "count_results": """> count(q)
+n = web.search(q) >> count()
+out n""",
     "multi_step_subscribe": """> notify(u)
 sub = db.create_sub(u)
 msg = mail.send(u, sub.id)
