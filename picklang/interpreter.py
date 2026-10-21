@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import operator
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -98,6 +99,16 @@ def _resolve_secrets(value):
     return value
 
 
+def _expr_uses_var(expr, var: str) -> bool:
+    if isinstance(expr, tuple):
+        if expr and expr[0] in ("var", "get") and str(expr[1]).split(".")[0] == var:
+            return True
+        return any(_expr_uses_var(x, var) for x in expr[1:])
+    if isinstance(expr, list):
+        return any(_expr_uses_var(x, var) for x in expr)
+    return False
+
+
 def _eval(expr, env, registry, hook, trace, state: _State):
     kind = expr[0]
     if kind == "lit":
@@ -119,7 +130,8 @@ def _eval(expr, env, registry, hook, trace, state: _State):
     if kind == "cmp":
         _, op, left, right = expr
         a, b = _eval(left, env, registry, hook, trace, state), _eval(right, env, registry, hook, trace, state)
-        return {"==": a == b, "!=": a != b, ">": a > b, "<": a < b, ">=": a >= b, "<=": a <= b}[op]
+        return {"==": operator.eq, "!=": operator.ne, ">": operator.gt,
+                "<": operator.lt, ">=": operator.ge, "<=": operator.le}[op](a, b)
     if kind == "pipe":
         value = _eval(expr[1][0], env, registry, hook, trace, state)
         for stage in expr[1][1:]:
@@ -176,7 +188,18 @@ def _aot_eligible(source: str, activity_hook, capabilities, untrusted) -> bool:
     if any(s.kind in ("wait", "parallel") for s in steps):
         # AOT currently executes parallel branches sequentially; keep interpreter semantics.
         return False
-    return all((s.retries or 0) == 0 and s.effect is None for s in steps)
+
+    def supported(step) -> bool:
+        if (step.retries or 0) != 0 or step.effect is not None:
+            return False
+        if step.kind == "loop":
+            body = step.body
+            return bool(body is not None and body.kind in ("assign", "expr")
+                        and (body.retries or 0) == 0 and body.effect is None
+                        and body.compensation is None)
+        return True
+
+    return all(supported(s) for s in steps)
 
 
 def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None = None,
@@ -186,8 +209,12 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
                 untrusted: tuple[str, ...] | set[str] = (),
                 prefer_aot: bool = True):
     """Возвращает (output, env, trace). Бросает WaitingSignal, если сигнала ещё нет."""
-    if prefer_aot and _aot_eligible(source, activity_hook, capabilities, untrusted):
-        from .aot import DoneWhenFailed, run_compiled
+    use_aot = prefer_aot and _aot_eligible(source, activity_hook, capabilities, untrusted)
+    if use_aot:
+        from .aot import _registry_supports_fused_pipes
+        use_aot = _registry_supports_fused_pipes(source, registry)
+    if use_aot:
+        from .aot import DoneWhenFailed, _LanguageError, _run_compiled_unchecked
         trace: list[str] = []
         def _traced(name, fn):
             def call(*args):
@@ -197,11 +224,16 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
         traced_registry = {name: _traced(name, fn) for name, fn in registry.items()}
         env0 = dict(inputs or {})
         try:
-            out, env_out = run_compiled(source, traced_registry, env0, signal_provider)
+            out, env_out = _run_compiled_unchecked(source, traced_registry, env0, signal_provider)
         except DoneWhenFailed as e:
             raise TaskNotDone(str(e)) from e
-        except RuntimeError as e:
+        except (WaitingSignal, AbortExecution, PickRuntimeError):
+            raise
+        except _LanguageError as e:
             raise PickRuntimeError(str(e)) from e
+        except Exception as e:
+            raise PickRuntimeError(
+                f"выполнение сорвалось, компенсаций выполнено: 0; причина: {e}") from e
         return out, env_out, trace
     steps = _parse_cached(source)
     env: dict[str, Any] = dict(inputs or {})
@@ -280,18 +312,27 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
                 # П.6: если у функции тела есть batch-вариант (fn.batch в реестре),
                 # вся коллекция уходит одним вызовом вместо roundtrip на элемент.
                 batch_fn = None
-                if body.kind == "assign" and body.expr[0] == "call":
-                    cand = registry.get(body.expr[1] + ".batch")
-                    if cand is not None:
-                        batch_fn = (body.expr[1] + ".batch", cand)
+                if body.kind == "assign" and body.expr and body.expr[0] == "call":
+                    arg_exprs = body.expr[2]
+                    # fn.batch — векторизованный fn по первому аргументу. Применять
+                    # его к любому прямому вызову нельзя: ship(10) или ship(i, i)
+                    # в теле цикла — не поэлементная форма, batch изменил бы смысл.
+                    elementwise = bool(
+                        arg_exprs and arg_exprs[0] == ("var", step.loop_var)
+                        and not any(_expr_uses_var(a, step.loop_var) for a in arg_exprs[1:]))
+                    if elementwise:
+                        cand = registry.get(body.expr[1] + ".batch")
+                        if cand is not None:
+                            batch_fn = (body.expr[1] + ".batch", cand)
                 if batch_fn is not None:
                     name, fn = batch_fn
                     trace.append(name)
                     args = [_eval(a, env, registry, activity_hook, trace, state) for a in body.expr[2][1:]]
-                    results = fn(list(items), *args)
+                    items_list = list(items)
+                    results = fn(items_list, *args)
                     if body.target:
                         env[body.target] = results
-                    env[step.loop_var] = items[-1] if items else None
+                    env[step.loop_var] = items_list[-1] if items_list else None
                 else:
                     for item in items:
                         env[step.loop_var] = item
@@ -335,7 +376,18 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
         comp_trace = compensate()
         raise PickRuntimeError(f"выполнение сорвалось, компенсаций выполнено: {len(comp_trace)}; причина: {exc}") from exc
     for cond in done_conditions:
-        if not _eval(cond, env, registry, activity_hook, trace, state):
+        try:
+            satisfied = _eval(cond, env, registry, activity_hook, trace, state)
+        except (WaitingSignal, AbortExecution):
+            raise
+        except PickRuntimeError:
+            compensate()
+            raise
+        except Exception as exc:
+            comp_trace = compensate()
+            raise PickRuntimeError(
+                f"выполнение сорвалось, компенсаций выполнено: {len(comp_trace)}; причина: {exc}") from exc
+        if not satisfied:
             compensate()
             raise TaskNotDone("критерии готовности (done when) не выполнены")
     return output, env, trace
