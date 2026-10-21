@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run two JSON-over-stdin task adapters on the same fixture set and save paired results."""
 import argparse
+import hashlib
 import json
 import shlex
 import subprocess
@@ -51,8 +52,9 @@ def run_one(command, task, timeout):
             return {"task": task["task"], "ok": False, "seconds": elapsed,
                     "error": "adapter must emit a JSON object with boolean 'ok'",
                     "stdout": proc.stdout[-2000:]}
-        row = {"task": task["task"], "ok": result["ok"], "seconds": elapsed,
-               "output": result.get("output")}
+        row = {"task": task["task"], "ok": result["ok"], "seconds": elapsed}
+        if "output" in result:
+            row["output"] = result["output"]
         if "error" in result:
             row["error"] = str(result["error"])[:1000]
         for field in ("prompt_tokens", "completion_tokens", "attempts", "model"):
@@ -121,28 +123,53 @@ def run_pair(tasks, pick_command, baseline_command, timeout=60, repeats=1):
                         task, repeat + 1,
                         f"skipped because {rate_limited_adapter} adapter hit a provider rate limit; no further API calls made",
                     )
+            both_succeeded = pair["pick"].get("ok") and pair["baseline"].get("ok")
+            has_both_outputs = "output" in pair["pick"] and "output" in pair["baseline"]
+            output_match = (
+                pair["pick"]["output"] == pair["baseline"]["output"]
+                if both_succeeded and has_both_outputs else None
+            )
+            # This is exact structural equality only, not a semantic correctness verdict.
             for name, row in pair.items():
                 row["repeat"] = repeat + 1
-                row["input_digest"] = __import__("hashlib").sha256(
+                row["input_digest"] = hashlib.sha256(
                     json.dumps(task["input"], sort_keys=True, ensure_ascii=False).encode("utf-8")
                 ).hexdigest()
+                row["output_match"] = output_match
                 (pick_rows if name == "pick" else baseline_rows).append(row)
+    comparable = [
+        row for row in pick_rows
+        if row.get("output_match") is not None
+    ]
+    matches = sum(row["output_match"] is True for row in comparable)
+    paired_successes = sum(
+        p.get("ok", False) and b.get("ok", False)
+        for p, b in zip(pick_rows, baseline_rows)
+    )
     return {
         "schema_version": 1,
         "tasks": [task["task"] for task in tasks],
         "repeats": repeats,
         "status": "INCONCLUSIVE_RATE_LIMIT" if rate_limit_hit else "COMPLETED",
         "rate_limit_detected": rate_limit_hit,
+        "comparison": {
+            "paired_successes": paired_successes,
+            "output_comparable": len(comparable),
+            "exact_output_matches": matches,
+            "exact_output_match_rate": matches / len(comparable) if comparable else None,
+            "note": "Exact structural output equality is a regression signal, not proof of semantic equivalence."
+        },
         "pick": pick_rows,
         "baseline": baseline_rows,
         "notes": [
             "Both adapters receive the same task name and input JSON.",
             "Adapter 'ok' is self-reported; configure adapters to apply the same task-specific validators.",
-            "Raw outputs are retained for review; exact output equality is not a substitute for semantic equivalence.",
+            "Exact output agreement is reported only when both adapters succeed and both provide an output; it is not a semantic-equivalence verdict.",
             "Seconds are measured locally per adapter invocation; provider-side billing may differ.",
             "On provider rate limiting, the benchmark stops issuing calls immediately and marks remaining rows skipped; these rows are not valid task failures.",
         ]
     }
+
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
@@ -162,6 +189,14 @@ def main(argv=None):
         print(f"Wrote {args.write}: {len(tasks)} tasks x {args.repeats} repeats per adapter")
         print(f"PICK pass: {sum(bool(r['ok']) for r in report['pick'])}/{len(report['pick'])}")
         print(f"Baseline pass: {sum(bool(r['ok']) for r in report['baseline'])}/{len(report['baseline'])}")
+        comparison = report["comparison"]
+        rate = comparison["exact_output_match_rate"]
+        rate_text = f"{rate:.1%}" if rate is not None else "n/a"
+        print(
+            "Exact output agreement: "
+            f"{comparison['exact_output_matches']}/{comparison['output_comparable']} ({rate_text}); "
+            "not a semantic-equivalence verdict"
+        )
         return 0
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
