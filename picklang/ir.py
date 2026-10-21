@@ -39,14 +39,21 @@ def compile_ir(source: str) -> dict[str, Any]:
         if s.name: item["name"] = s.name
         if s.params: item["params"] = s.params
         if s.target and s.kind == "assign": item["target"] = s.target
+        if s.retries: item["retries"] = s.retries
+        if s.effect: item["effect"] = s.effect
         if s.signal: item["signal"] = s.signal
         if s.budget: item["budget"] = s.budget
         if s.branches: item["branches"] = [[tgt, _expr_ir(e)] for tgt, e in s.branches]
         if s.kind == "loop":
             item["loop_var"] = s.loop_var
             b = s.body
-            item["body"] = {"kind": b.kind, "target": b.target,
-                            "expr": _expr_ir(b.expr) if b.expr is not None else None}
+            body_item = {"kind": b.kind, "target": b.target,
+                         "expr": _expr_ir(b.expr) if b.expr is not None else None}
+            if b.retries: body_item["retries"] = b.retries
+            if b.effect: body_item["effect"] = b.effect
+            if b.compensation is not None:
+                body_item["compensation"] = _expr_ir(b.compensation)
+            item["body"] = body_item
         if s.kind == "donewhen":
             item["conditions"] = [_expr_ir(e) for e in s.expr]
         elif s.expr is not None: item["expr"] = _expr_ir(s.expr)
