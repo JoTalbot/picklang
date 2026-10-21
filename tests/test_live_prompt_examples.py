@@ -1,5 +1,5 @@
 from bench_live_adapters import PICK_TASK_EXAMPLES, build_pick_prompt
-from eval_live_cascade import GRAMMAR, TASKS, make_validator
+from eval_live_cascade import (CASCADE_TASK_EXAMPLES, GRAMMAR, TASKS, build_cascade_prompt, make_validator)
 
 
 def task_named(name):
@@ -64,3 +64,20 @@ def test_unknown_task_falls_back_to_full_grammar():
 def test_all_six_compact_examples_pass_the_real_task_validators():
     for task in TASKS[:6]:
         assert make_validator(task)(PICK_TASK_EXAMPLES[task["name"]]), task["name"]
+
+
+
+def test_all_live_cascade_prompts_are_task_scoped_and_include_valid_examples():
+    assert set(CASCADE_TASK_EXAMPLES) == {task["name"] for task in TASKS}
+    for task in TASKS:
+        prompt = build_cascade_prompt(task)
+        assert task["task"] in prompt
+        assert task["name"] not in prompt or "Пример:" in prompt
+        assert make_validator(task)(CASCADE_TASK_EXAMPLES[task["name"]]), task["name"]
+
+
+def test_unknown_cascade_task_falls_back_to_full_grammar():
+    task = {"name": "future_task", "task": "future behavior", "tools": ["fn"], "inputs": {"x": 1}}
+    prompt = build_cascade_prompt(task)
+    assert GRAMMAR in prompt
+    assert "future behavior" in prompt
