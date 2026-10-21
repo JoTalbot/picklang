@@ -101,3 +101,24 @@ def test_gate_rejects_different_inputs_or_models():
     passed, message = evaluate_report(candidate)
     assert passed is False
     assert "model mismatch" in message
+
+
+
+def test_gate_rejects_missing_or_unknown_report_status():
+    candidate = report()
+    candidate.pop("status")
+    passed, message = evaluate_report(candidate)
+    assert passed is False
+    assert "expected COMPLETED" in message
+
+    candidate = report()
+    candidate["status"] = "PARTIAL_BUT_LOOKS_GREEN"
+    passed, message = evaluate_report(candidate)
+    assert passed is False
+    assert "expected COMPLETED" in message
+
+
+def test_gate_rejects_non_object_report():
+    passed, message = evaluate_report([])
+    assert passed is False
+    assert "expected a JSON object" in message

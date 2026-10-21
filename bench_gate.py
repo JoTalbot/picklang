@@ -6,8 +6,12 @@ from pathlib import Path
 
 
 def evaluate_report(report):
+    if not isinstance(report, dict):
+        return False, "invalid report: expected a JSON object"
     if report.get("status") == "INCONCLUSIVE_RATE_LIMIT" or report.get("rate_limit_detected"):
         return False, "INCONCLUSIVE: provider rate limit; refusing to publish without efficiency evidence"
+    if report.get("status") != "COMPLETED":
+        return False, f"invalid report status: expected COMPLETED, got {report.get('status')!r}"
     tasks = report.get("tasks")
     try:
         repeats = int(report.get("repeats", 1))
