@@ -195,10 +195,71 @@ def check_contracts(source: str, contracts: dict[str, dict]) -> list[dict[str, A
     return diags
 
 
-def check_effects(source: str) -> list[dict[str, Any]]:
-    """П.5 — Денежные/необратимые шаги без компенсации получают предупреждение."""
+# Эффект, выводимый из последнего сегмента имени вызова, когда ни контракт,
+# ни аннотация @fx эффект не задают. Тот же набор глаголов, что
+# DANGEROUS_SUFFIXES в proof.py, минус refund (это сама компенсация) и send
+# (его риски покрывают taint-контроль и prove_safety, а не сага).
+_INFERRED_EFFECTS = {"charge": "money", "pay": "money", "transfer": "money",
+                     "delete": "irreversible", "remove": "irreversible", "drop": "irreversible"}
+
+
+def _call_names_in_expr(expr):
+    if isinstance(expr, tuple):
+        if expr and expr[0] == "call":
+            yield expr[1]
+        for x in expr[1:]:
+            yield from _call_names_in_expr(x)
+    elif isinstance(expr, list):
+        for x in expr:
+            yield from _call_names_in_expr(x)
+
+
+def _effect_steps(steps):
+    """Шаги, у которых вообще могут быть эффект и компенсация, включая тело цикла."""
+    for s in steps:
+        if s.kind == "loop" and s.body is not None:
+            yield from _effect_steps([s.body])
+        elif s.kind in ("assign", "expr"):
+            yield s
+
+
+def check_effects(source: str, contracts: dict[str, dict] | None = None) -> list[dict[str, Any]]:
+    """П.5 — Денежные/необратимые шаги без компенсации получают предупреждение.
+
+    Эффект шага определяется по убыванию приоритета:
+    1. поле effect в контракте функции (`{"bank.charge": {"effect": "money"}}`),
+       если контракты переданы;
+    2. аннотация `@fx` в исходнике (явная `@fx read` отключает вывод из имени);
+    3. вывод из имени вызова, как в proof.prove_safety.
+    Раньше работал только п.2: проверка зависела от того, что модель сама
+    не забудет аннотировать опасный шаг, — а ловить она должна ровно такие
+    пропуски. Шаги в теле `for` проверяются наравне с верхним уровнем.
+    """
     from .parser import parse
-    return [{"line": s.line, "level": "warning", "code": "EFFECT_NO_COMPENSATION",
-             "message": f"шаг с эффектом {s.effect} без компенсации ! — откат нечем делать"}
-            for s in parse(source) if s.effect in ("money", "irreversible") and s.compensation is None]
+    diags: list[dict[str, Any]] = []
+    for s in _effect_steps(parse(source)):
+        if s.compensation is not None:
+            continue
+        calls = list(_call_names_in_expr(s.expr)) if s.expr is not None else []
+        effect: Any = None
+        via = ""
+        if contracts:
+            for call in calls:
+                spec = contracts.get(call) or {}
+                if "effect" in spec:
+                    effect, via = spec["effect"], f"эффект из контракта {call}"
+                    break
+        if effect is None and s.effect is not None:
+            effect, via = s.effect, "эффект из аннотации @fx"
+        if effect is None:
+            for call in calls:
+                inferred = _INFERRED_EFFECTS.get(call.rsplit(".", 1)[-1])
+                if inferred:
+                    effect = inferred
+                    via = f"эффект выведен из имени {call}; укажите @fx, чтобы переопределить"
+                    break
+        if effect in ("money", "irreversible"):
+            diags.append({"line": s.line, "level": "warning", "code": "EFFECT_NO_COMPENSATION",
+                          "message": f"шаг с эффектом {effect} без компенсации ! — откат нечем делать ({via})"})
+    return diags
 

@@ -41,9 +41,11 @@ def format_source(source: str) -> str:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pick")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("check", "fmt"):
-        s = sub.add_parser(name)
-        s.add_argument("file")
+    s = sub.add_parser("check")
+    s.add_argument("file")
+    s.add_argument("--contracts", help="JSON-файл контрактов функций {имя: {args, returns, effect}}")
+    s = sub.add_parser("fmt")
+    s.add_argument("file")
     s = sub.add_parser("run")
     s.add_argument("file")
     s.add_argument("--inputs", default="{}")
@@ -66,7 +68,11 @@ def _dispatch(args) -> int:
     if args.cmd == "check":
         from .check import check_contracts, check_effects, check_source
         src = _read(args.file)
-        diags = check_source(src) + check_effects(src)
+        contracts = json.loads(_read(args.contracts)) if args.contracts else None
+        diags = check_source(src)
+        if contracts is not None:
+            diags += check_contracts(src, contracts)
+        diags += check_effects(src, contracts)
         print(json.dumps(diags, ensure_ascii=False, indent=1) if diags else "OK: замечаний нет")
         return 1 if any(d.get("level") == "error" for d in diags) else 0
     if args.cmd == "fmt":
