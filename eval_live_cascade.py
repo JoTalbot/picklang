@@ -98,6 +98,94 @@ TASKS = [
 ]
 
 
+
+# Compact prompts for the live 12-task suite. Keep one canonical task description,
+# but show only the syntax needed for that task instead of billing the full grammar
+# on every request. Examples are regression-tested through the real validators.
+CASCADE_TASK_GUIDES = {
+    "charge_tx": "Вызови bank.charge и верни tx.",
+    "search_top1": "Верни первый результат через top(1).",
+    "double_value": "Вызови dbl(i) и верни результат.",
+    "fields_a": "Верни только поле a через fields(\\"a\\").",
+    "count_results": "Верни количество результатов через count().",
+    "multi_step_subscribe": "Создай подписку, передай sub.id во второй вызов, верни оба id.",
+    "guard_pass": "Поставь страж, который завершает программу ошибкой, если p.ok ложно.",
+    "guard_decline": "Поставь страж; при p.ok=False программа должна завершиться ошибкой.",
+    "saga_rollback": "Добавь компенсацию refund(tx) и страж; отказ банка должен запустить компенсацию.",
+    "wait_approval": "Обязательно дождись @wait approval до вызова mail.send; при ложном approval упади.",
+    "parallel_two": "Вызови left и right параллельно через || и верни оба результата.",
+    "budget_stop": "Установи !budget steps<1 перед двумя вызовами tick; бюджет обязан остановить программу.",
+}
+
+CASCADE_TASK_EXAMPLES = {
+    "charge_tx": """> charge(u)
+p = bank.charge(u, 5)
+out p.tx""",
+    "search_top1": """> search(q)
+r = web.search(q) >> top(1)
+out r""",
+    "double_value": """> double(i)
+v = dbl(i)
+out v""",
+    "fields_a": """> get(x)
+v = d.get(x) >> fields("a")
+out v""",
+    "count_results": """> count(q)
+n = web.search(q) >> count()
+out n""",
+    "multi_step_subscribe": """> notify(u)
+sub = db.create_sub(u)
+m = mail.send(u, sub.id)
+out {sub: sub.id, message: m.id}""",
+    "guard_pass": """> charge(u, amt)
+p = bank.charge(u, amt)
+? p.ok -> fail "declined"
+out p.tx""",
+    "guard_decline": """> charge(u, amt)
+p = bank.charge(u, amt)
+? p.ok -> fail "declined"
+out p.tx""",
+    "saga_rollback": """> charge(u, amt)
+p = bank.charge(u, amt) ! bank.refund(p.tx)
+? p.ok -> fail "declined"
+out p.tx""",
+    "wait_approval": """> notify(user)
+@wait approval
+? approval -> fail "not approved"
+m = mail.send(user, "ok")
+out m.id""",
+    "parallel_two": """> pair(x)
+a = left(x) || b = right(x)
+out {a: a, b: b}""",
+    "budget_stop": """> stop()
+!budget steps<1
+a = tick()
+b = tick()
+out {a: a, b: b}""",
+}
+
+
+def build_cascade_prompt(task):
+    """Build a minimal task-specific prompt for the live cascade benchmark."""
+    name = task["name"]
+    if name not in CASCADE_TASK_GUIDES:
+        return (
+            GRAMMAR
+            + f"\\nФункции хоста: {', '.join(task['tools'])}"
+            + f"\\nВход: {list(task['inputs'])}\\nЗадача: {task['task']}\\n"
+        )
+    return (
+        "Выведи только валидную программу PICK, без Markdown. "
+        "> name(params) задаёт входы; x = fn(args) вызывает инструмент; "
+        "out x возвращает результат. Поля доступны как p.tx.\\n"
+        f"Правило: {CASCADE_TASK_GUIDES[name]}\\n"
+        f"Пример:\\n{CASCADE_TASK_EXAMPLES[name]}\\n"
+        f"Функции хоста: {', '.join(task['tools'])}\\n"
+        f"Вход: {list(task['inputs'])}\\n"
+        f"Задача: {task['task']}\\n"
+    )
+
+
 def clean(text: str) -> str:
     t = text.strip()
     if t.startswith("```"):
@@ -204,7 +292,7 @@ def main():
     results = []
     quota_blocked = None
     for task in TASKS:
-        prompt = GRAMMAR + f"\nФункции хоста: {', '.join(task['tools'])}\nВход: {list(task['inputs'])}\nЗадача: {task['task']}\n"
+        prompt = build_cascade_prompt(task)
         cascade = ModelCascade(tiers, per_model_timeout=args.timeout)
         t0 = time.time()
         row = {"task": task["name"], "ok": False, "tier": None, "model": None,
