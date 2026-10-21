@@ -1,3 +1,18 @@
+# picklang 0.1.7
+
+Patch release focused on lower live-generation overhead and fewer fallback calls.
+
+- Use task-scoped prompts and executable examples for all 12 live-cascade tasks, not only the six paired straight-line tasks.
+- Preserve a full-grammar fallback for unknown task names.
+- Add a strict saga rollback instruction: compensation stays attached to the charge step, then the guard fails, preserving rollback order.
+- Add regression tests that run all 12 examples through the real task validators, including guards, compensation, `@wait`, parallel branches, and budgets.
+
+Verified on 2026-10-21 with the live Groq cascade: 12/12 tasks passed on tier-0 in 12 attempts, using 3,470 reported tokens and 4.6 seconds summed task duration. The previous comparable run used 6,525 tokens, 14 attempts, and 9.7 seconds. This is a single live sample, not a latency guarantee.
+
+The paired same-model PICK-vs-classic-Python gate also passed: 6/6 tasks for each adapter, 6/6 exact output matches, 1,703 PICK tokens vs 2,102 Python tokens (19.0% fewer reported tokens). This measures the tested fixture, not universal end-to-end agent cost.
+
+---
+
 # picklang 0.1.6
 
 Patch release focused on reducing live prompt overhead while retaining strict correctness checks.
