@@ -1,20 +1,14 @@
-# picklang 0.1.5
+# picklang 0.1.6
 
-Patch release focused on live benchmark reliability and release safety.
+Patch release focused on reducing live prompt overhead while retaining strict correctness checks.
 
-- Retry a failed candidate once with the same configured model in paired PICK-vs-Python tests, keeping model choice identical across adapters.
-- Enforce the paired benchmark as a release quality gate: both adapters must pass every task and return identical expected outputs; missing or incomplete reports block publication.
-- Treat detected provider rate limits as inconclusive instead of misclassifying skipped work as task failure; the independent live cascade remains required.
-- Bump the package version so this release is published under a new immutable tag instead of silently reusing the existing v0.1.4 release.
+- Use task-scoped PICK instructions for the six paired benchmark tasks instead of repeating the full DSL grammar on every request.
+- Keep operator-specific guidance and examples only where needed; unknown tasks fall back to the complete grammar.
+- Add regression tests for prompt size, required operator guidance, and safe fallback behavior.
+- Strengthen the release gate: the paired benchmark must pass every task with identical outputs, provide nonzero usage telemetry, and demonstrate lower total reported tokens for PICK than classic Python. Rate-limited or incomplete runs are inconclusive and cannot publish this optimization release.
+- Keep the separate 12-task Groq cascade as an independent correctness gate.
 
-- Fix Temporal generated workflow code so comparison expressions are evaluated, including explicit rejection of unsupported comparison operators.
-- Add a regression test that compiles generated Temporal source and verifies comparison support before the optional SDK integration check.
-- Keep the shared live-task grammar below the 240-token budget; attach task-specific few-shot examples only to tasks that need them, and print bounded rejected-response diagnostics directly in Actions logs.
-- Clarify that the live signal-wait task must contain an explicit `@wait approval` step; a plain guard is not a durable wait.
-- Keep the release gate tied to the exact main commit: unit tests, package build and smoke checks, and all six live Groq cascade tasks must pass.
-- Preserve transparent paired A/B results in workflow logs and Job Summary; a single live sample is evidence for that run only, not a general performance guarantee.
-
-Latest observed live run (2026-10-21): the independent Groq cascade passed 12/12 tasks, while the same-model paired benchmark passed PICK 4/6 and classic Python 6/6. The release gate correctly blocked publication. The paired sample is small and does not establish a general speed or cost advantage; live evaluation consumes provider quota.
+Verified v0.1.5 baseline on 2026-10-21: same-model paired run passed 6/6 tasks for both PICK and classic Python, with identical outputs on all six. PICK used 2,710 reported tokens and 4.94 seconds summed invocation time; Python used 2,105 tokens and 3.30 seconds. This is a single small sample, not a general performance claim. v0.1.6 will publish only if the new live run demonstrates a token reduction without task regressions.
 
 ---
 
