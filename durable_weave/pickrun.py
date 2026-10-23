@@ -56,4 +56,6 @@ def run_pick(source: str, registry, inputs, workdir, execution_id: str,
             raise SimulatedCrash(str(abort)) from abort
         return output
 
-    return executor.run(execution_id, workflow, inputs), executor
+    from .cas import sha256_hex
+    return executor.run(execution_id, workflow, inputs,
+                        workflow_version=sha256_hex(source.encode("utf-8"))), executor

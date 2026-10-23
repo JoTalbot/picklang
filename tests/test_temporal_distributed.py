@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.temporal
+
 pytest.importorskip("temporalio")
 
 

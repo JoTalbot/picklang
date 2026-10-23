@@ -22,6 +22,9 @@ class IdempotentStore:
         row = self.db.execute("SELECT result FROM idem WHERE key=?", (key,)).fetchone()
         return json.loads(row[0]) if row else None
 
+    def contains(self, key: str) -> bool:
+        return self.db.execute("SELECT 1 FROM idem WHERE key=?", (key,)).fetchone() is not None
+
     def put(self, key: str, result: Any):
         with self.db:
             self.db.execute("INSERT OR REPLACE INTO idem VALUES (?,?)", (key, json.dumps(result, ensure_ascii=False)))
@@ -35,7 +38,7 @@ def idempotent(fn: Callable, store: IdempotentStore, name: str = "") -> Callable
             return fn(payload)  # без ключа дедуплицировать нечего — честно выполняем
         key = f"{name or fn.__name__}:{payload.get('_execution_id')}:{key_raw}"
         hit = store.get(key)
-        if hit is not None:
+        if hit is not None or store.contains(key):
             return hit
         result = fn(payload)
         store.put(key, result)

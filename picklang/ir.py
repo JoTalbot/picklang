@@ -14,6 +14,8 @@ from .parser import Step, parse
 
 def _expr_ir(expr) -> Any:
     kind = expr[0]
+    if kind == "bool":
+        return {"bool": [expr[1], [_expr_ir(e) for e in expr[2]]]}
     if kind == "call":
         return {"call": expr[1], "args": [_expr_ir(a) for a in expr[2]]}
     if kind == "var":
@@ -32,10 +34,16 @@ def _expr_ir(expr) -> Any:
 
 
 def compile_ir(source: str) -> dict[str, Any]:
-    steps = parse(source)
+    return {"lang": "pick", "version": "0.1", "steps": _steps_ir(parse(source))}
+
+
+def _steps_ir(steps):
     ir_steps = []
     for s in steps:
         item: dict[str, Any] = {"kind": s.kind, "line": s.line}
+        if s.kind == "conditional":
+            item["cases"] = [{"condition": _expr_ir(cond) if cond is not None else None,
+                              "steps": _steps_ir(body)} for cond, body in s.cases]
         if s.name: item["name"] = s.name
         if s.params: item["params"] = s.params
         if s.target and s.kind == "assign": item["target"] = s.target
@@ -71,7 +79,7 @@ def compile_ir(source: str) -> dict[str, Any]:
         if s.kind == "guard": item["fail"] = _expr_ir(s.target)
         if s.compensation is not None: item["compensation"] = _expr_ir(s.compensation)
         ir_steps.append(item)
-    return {"lang": "pick", "version": "0.1", "steps": ir_steps}
+    return ir_steps
 
 
 def canonical(obj: Any) -> bytes:

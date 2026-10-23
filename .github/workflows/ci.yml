@@ -39,8 +39,12 @@ jobs:
   # Run untrusted PR code only on GitHub-hosted runners, never on the self-hosted machine.
   pr-tests:
     name: PR unit tests and package checks
-    if: github.repository == 'JoTalbot/testing' && github.event_name == 'pull_request' && github.base_ref == 'main'
+    if: github.repository == 'JoTalbot/picklang' && github.event_name == 'pull_request' && github.base_ref == 'main'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -48,12 +52,12 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
           cache: pip
       - name: Install package and test dependencies
         run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
       - name: Run tests
-        run: python -m pytest tests/ -q
+        run: python -m pytest tests/ -q -m "not temporal"
       - name: Build source distribution and wheel
         run: |
           python -m pip install build
@@ -67,7 +71,7 @@ jobs:
 
   tests:
     name: Unit tests and package checks
-    if: github.repository == 'JoTalbot/testing' && github.ref == 'refs/heads/main'
+    if: github.repository == 'JoTalbot/picklang' && github.ref == 'refs/heads/main'
     # Trusted main-branch CI uses the repository's Linux ARM64 self-hosted runner.
     runs-on: [self-hosted, linux, arm64]
     timeout-minutes: 15
@@ -79,8 +83,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_REPOSITORY" != "JoTalbot/testing" || "$GITHUB_REF" != "refs/heads/main" ]]; then
-            echo "::error::Only JoTalbot/testing on main is allowed to use this trusted runner."
+          if [[ "$GITHUB_REPOSITORY" != "JoTalbot/picklang" || "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Only JoTalbot/picklang on main is allowed to use this trusted runner."
             exit 1
           fi
           latest_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
@@ -95,7 +99,7 @@ jobs:
       - name: Install package and test dependencies
         run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
       - name: Run tests
-        run: python -m pytest tests/ -q
+        run: python -m pytest tests/ -q -m "not temporal"
       - name: Build source distribution and wheel
         run: |
           python -m pip install build
@@ -125,11 +129,26 @@ jobs:
           echo "========== CLASSIC PYTHON BASELINE =========="
           cat docs/LIVE_CYCLE.md
 
+  temporal-integration:
+    name: Temporal integration
+    if: github.repository == 'JoTalbot/picklang'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest tests/ -q -m temporal
+
   live-openrouter:
     name: Live Groq cascade
     needs: tests
     if: >-
-      github.repository == 'JoTalbot/testing' &&
+      github.repository == 'JoTalbot/picklang' &&
       github.ref == 'refs/heads/main' &&
       needs.tests.result == 'success' &&
       (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_live))
@@ -150,7 +169,7 @@ jobs:
         run: |
           set -euo pipefail
           latest_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
-          if [[ "$GITHUB_REPOSITORY" != "JoTalbot/testing" || "$GITHUB_REF" != "refs/heads/main" || -z "$latest_sha" || "$GITHUB_SHA" != "$latest_sha" ]]; then
+          if [[ "$GITHUB_REPOSITORY" != "JoTalbot/picklang" || "$GITHUB_REF" != "refs/heads/main" || -z "$latest_sha" || "$GITHUB_SHA" != "$latest_sha" ]]; then
             echo "::error::Refusing live API calls from an untrusted or stale workflow run."
             exit 1
           fi
@@ -371,7 +390,7 @@ jobs:
     name: Publish versioned GitHub Release
     needs: [tests, live-openrouter]
     if: >-
-      github.repository == 'JoTalbot/testing' &&
+      github.repository == 'JoTalbot/picklang' &&
       github.ref == 'refs/heads/main' &&
       github.event_name == 'push' &&
       needs.tests.result == 'success' &&

@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import math
 import operator
 import os
 import threading
@@ -175,6 +176,42 @@ def _call(expr, env, registry, hook, trace, state: _State, piped=...):
     return state.charge_call(name, result)
 
 
+def _condition(expr, env):
+    kind = expr[0]
+    if kind == "bool":
+        values = [_condition(e, env) for e in expr[2]]  # eager validation, fail closed
+        return not values[0] if expr[1] == "not" else (all(values) if expr[1] == "and" else any(values))
+    def value(e):
+        if e[0] == "lit":
+            result = e[1]
+        elif e[0] in ("var", "get"):
+            parts = e[1].split(".")
+            if parts[0] not in env:
+                raise PickRuntimeError(f"undefined condition variable: {parts[0]}")
+            result = env[parts[0]]
+            for part in parts[1:]:
+                if type(result) is not dict or part not in result:
+                    raise PickRuntimeError(f"unknown condition field: {e[1]}")
+                result = result[part]
+        else:
+            raise PickRuntimeError("impure or unsupported condition")
+        if type(result) not in (bool, str, int, float) or (type(result) is float and not math.isfinite(result)):
+            raise PickRuntimeError("undefined or invalid condition value")
+        return result
+    if kind == "cmp":
+        a, b = value(expr[2]), value(expr[3])
+        if type(a) is not type(b):
+            raise PickRuntimeError("condition operand type mismatch")
+        if expr[1] not in ("==", "!=") and type(a) is bool:
+            raise PickRuntimeError("ordered boolean condition is unsupported")
+        return {"==": operator.eq, "!=": operator.ne, ">": operator.gt,
+                "<": operator.lt, ">=": operator.ge, "<=": operator.le}[expr[1]](a, b)
+    result = value(expr)
+    if type(result) is not bool:
+        raise PickRuntimeError("condition must be boolean")
+    return result
+
+
 def _aot_eligible(source: str, activity_hook, capabilities, untrusted) -> bool:
     """AOT — быстрый путь без саг, бюджетов, taint, capabilities и durable-хуков."""
     if activity_hook is not None or capabilities is not None or untrusted:
@@ -185,7 +222,7 @@ def _aot_eligible(source: str, activity_hook, capabilities, untrusted) -> bool:
         steps = _parse_cached(source)
     except Exception:
         return False
-    if any(s.kind in ("wait", "parallel") for s in steps):
+    if any(s.kind in ("wait", "parallel", "conditional") for s in steps):
         # AOT currently executes parallel branches sequentially; keep interpreter semantics.
         return False
 
@@ -275,21 +312,46 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
         if step.effect:
             state.effects.append(f"{step.effect}:{step.target or 'step'}")
         if step.compensation is not None:
-            compensations.append(step.compensation)
+            compensations.append((step.compensation, dict(env)))
         return value
 
     def compensate() -> list[str]:
         """Общий откат саги: выполняется на любом бизнес-сбое, кроме паузы/краха."""
         comp_trace: list[str] = []
-        for comp in reversed(compensations):
+        for comp, comp_env in reversed(compensations):
             try:
-                _eval(comp, env, registry, activity_hook, comp_trace, state)
+                _eval(comp, comp_env, registry, activity_hook, comp_trace, state)
             except Exception:
                 pass
         return comp_trace
 
+    def selected(items):
+        for item in items:
+            if item.kind != "conditional":
+                yield item
+                continue
+            # Все условия должны быть определены и корректны до первого эффекта ветки.
+            decisions = [True if cond is None else _condition(cond, env) for cond, _ in item.cases]
+            choice = next((i for i, decision in enumerate(decisions) if decision), None)
+            if choice is None:
+                raise PickRuntimeError("no conditional branch matched")
+            before = dict(env)
+            taint_before = set(state.tainted)
+            approved_before = state.approved
+            body = item.cases[choice][1]
+            targets = {s.target for s in body if s.kind == "assign"}
+            if targets & before.keys():
+                raise PickRuntimeError("branch assignment cannot overwrite outer variable")
+            try:
+                yield from selected(body)
+            finally:
+                env.clear()
+                env.update(before)
+                state.tainted = taint_before
+                state.approved = approved_before
+
     try:
-        for step in steps:
+        for step in selected(steps):
             if step.kind == "goal":
                 missing = [p for p in step.params if p not in env]
                 if missing:

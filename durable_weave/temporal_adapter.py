@@ -40,6 +40,8 @@ class {workflow_name}:
 
     @workflow.run
     async def run(self, ir: dict, inputs: dict):
+        if any(step["kind"] == "conditional" for step in ir["steps"]):
+            raise ApplicationError("Temporal does not support conditional; use local interpreter", non_retryable=True)
         env = dict(inputs)
         for step in ir["steps"]:
             kind = step["kind"]
@@ -129,6 +131,8 @@ try:  # pragma: no cover - зависит от окружения
 
         @_workflow.run
         async def run(self, ir: dict, inputs: dict):
+            if any(step["kind"] == "conditional" for step in ir["steps"]):
+                raise _AppErr("Temporal does not support conditional; use local interpreter", non_retryable=True)
             env = dict(inputs)
             compensations = []
             try:

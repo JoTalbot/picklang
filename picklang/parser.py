@@ -36,6 +36,7 @@ class Step:
     params: list[str] = field(default_factory=list)
     budget: dict = field(default_factory=dict)      # для kind=budget
     branches: list = field(default_factory=list)     # для kind=parallel: [(target, expr)]
+    cases: list = field(default_factory=list)         # [(pure condition | None, list[Step])]
     retries: int = 0                                 # суффикс ^N на шаге
     effect: str | None = None                        # @fx read|write|money|irreversible
     timeout: int | None = None                       # для wait: секунды
@@ -97,6 +98,8 @@ def _find_cmp(text: str):
     while i < len(text):
         ch = text[i]
         if quote:
+            if ch == "\\":
+                i += 2; continue
             if ch == quote: quote = None
             i += 1; continue
         if ch in "\"'": quote = ch; i += 1; continue
@@ -119,6 +122,8 @@ def _split_top(text: str, sep: str) -> list[str]:
         ch = text[i]
         if quote:
             cur += ch
+            if ch == "\\" and i + 1 < len(text):
+                cur += text[i + 1]; i += 2; continue
             if ch == quote:
                 quote = None
             i += 1
@@ -136,9 +141,101 @@ def _split_top(text: str, sep: str) -> list[str]:
     return [p.strip() for p in parts if p.strip() != ""]
 
 
+def _parse_condition(text: str, line: int, raw: str, depth: int = 0):
+    if depth > MAX_EXPR_DEPTH:
+        raise PickSyntaxError(line, raw, "условие слишком глубоко вложено")
+    text = text.strip()
+    # Скобки вокруг целого условия, но не вокруг отдельного операнда сравнения.
+    if text.startswith("(") and text.endswith(")"):
+        level, quote, index = 0, None, 0
+        closes_at_end = True
+        while index < len(text):
+            ch = text[index]
+            if quote:
+                if ch == "\\":
+                    index += 2
+                    continue
+                if ch == quote:
+                    quote = None
+            elif ch in "\"'":
+                quote = ch
+            elif ch == "(":
+                level += 1
+            elif ch == ")":
+                level -= 1
+            if level == 0 and index != len(text) - 1:
+                closes_at_end = False
+                break
+            index += 1
+        if closes_at_end:
+            return _parse_condition(text[1:-1], line, raw, depth + 1)
+    for op in (" or ", " and "):
+        parts = _split_top(text, op)
+        if len(parts) > 1:
+            return ("bool", op.strip(), [_parse_condition(p, line, raw, depth + 1) for p in parts])
+    if text.startswith("not "):
+        return ("bool", "not", [_parse_condition(text[4:], line, raw, depth + 1)])
+    expr = _parse_expr(text, line, raw)
+    def pure(e):
+        if e[0] in ("var", "get", "lit"):
+            return True
+        return e[0] == "cmp" and pure(e[2]) and pure(e[3])
+    if not pure(expr):
+        raise PickSyntaxError(line, raw, "условие должно быть чистым: вызовы и pipeline запрещены")
+    return expr
+
+
 def parse(source: str) -> list[Step]:
     steps: list[Step] = []
+    # Каждый frame содержит сам conditional, родительский список и признак else.
+    stack = []
+    current = steps
     for lineno, raw in enumerate(source.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("@if "):
+            if len(stack) >= 8:
+                raise PickSyntaxError(lineno, raw, "вложенность @if ограничена 8")
+            case = []
+            node = Step("conditional", lineno, cases=[(_parse_condition(line[4:], lineno, raw), case)])
+            current.append(node)
+            stack.append((node, current, False))
+            current = case
+        elif line.startswith("@else_if ") or line == "@else":
+            if not stack:
+                raise PickSyntaxError(lineno, raw, "ветка без @if")
+            node, parent, seen_else = stack[-1]
+            if seen_else or not current:
+                raise PickSyntaxError(lineno, raw, "дублированная @else или пустая ветка")
+            condition = None if line == "@else" else _parse_condition(line[9:], lineno, raw)
+            current = []
+            node.cases.append((condition, current))
+            stack[-1] = (node, parent, condition is None)
+        elif line == "@end":
+            if not stack or not current:
+                raise PickSyntaxError(lineno, raw, "лишний @end или пустая ветка")
+            _, current, _ = stack.pop()
+        else:
+            if line.startswith(("@if", "@else", "@end")):
+                raise PickSyntaxError(lineno, raw, "неверная директива ветвления")
+            node = _parse_lines(raw, line_offset=lineno - 1)[0]
+            node.line = lineno
+            if stack and node.kind not in ("assign", "expr", "guard", "out", "wait"):
+                raise PickSyntaxError(lineno, raw, "шаг не поддержан внутри @if")
+            if stack and node.kind == "wait" and (node.timeout is not None or node.else_step is not None):
+                raise PickSyntaxError(lineno, raw, "wait timeout/else внутри @if не поддержан")
+            current.append(node)
+    if stack:
+        raise PickSyntaxError(stack[-1][0].line, "", "незакрытый @if: ожидается @end")
+    if not steps:
+        raise PickSyntaxError(0, "", "пустая программа")
+    return steps
+
+
+def _parse_lines(source: str, line_offset: int = 0) -> list[Step]:
+    steps: list[Step] = []
+    for lineno, raw in enumerate(source.splitlines(), 1 + line_offset):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
