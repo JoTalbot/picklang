@@ -17,6 +17,7 @@
 
 - [Архитектура](docs/ARCHITECTURE.md) · [Язык](docs/LANGUAGE.md)
 - [Контракт восстановления и ограничения](docs/RELIABILITY.md)
+- [Локальная интеграционная приёмка и контракты адаптеров](docs/INTEGRATION_ACCEPTANCE.md)
 - [Методика бенчмарков](docs/BENCHMARKS.md) · [Парное A/B](docs/PAIRED_AB.md)
 - [История релизов](RELEASE_NOTES.md)
 
