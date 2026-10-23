@@ -9,4 +9,4 @@ from .interpreter import run_program, Registry
 from .ir import compile_ir, program_digest
 
 __all__ = ["parse", "PickSyntaxError", "run_program", "Registry", "compile_ir", "program_digest"]
-__version__ = "0.1.0"
+__version__ = "0.1.11"

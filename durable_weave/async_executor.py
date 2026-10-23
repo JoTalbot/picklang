@@ -62,11 +62,19 @@ class AsyncDurableExecutor(DurableExecutor):
                 return i, await self.handlers[name]({**payload, "_idempotency_key": step(i, name, key),
                                                      "_requested_key": key,
                                                      "_execution_id": self._execution_id_current})
-            done = dict(await asyncio.gather(*(run_one(it) for it in pending.items())))
-            for i in pending:  # коммиты — строго в объявленном порядке
+            # Как ThreadPoolExecutor, дожидаемся всех уже начатых ветвей.
+            # Ошибка одной ветви не должна оставлять фоновые эффекты после return.
+            outcomes = await asyncio.gather(*(run_one(it) for it in pending.items()), return_exceptions=True)
+            for outcome in outcomes:
+                if isinstance(outcome, BaseException):
+                    raise outcome
+            done = dict(outcomes)
+            frontier = []
+            for i in pending:
                 name, payload, key = pending[i]
-                self._commit_activity(step(i, name, key), name, payload, done[i], key)
+                frontier.append((step(i, name, key), name, payload, done[i], key))
                 results[i] = done[i]
+            self._commit_frontier(frontier)
         return list(results)
 
     def verify(self, execution_id: str) -> bool:  # type: ignore[override]
