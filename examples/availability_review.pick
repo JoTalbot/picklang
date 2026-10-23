@@ -1,0 +1,22 @@
+# Только локальные черновики и заявки на ручное рассмотрение, не операции склада.
+> availability_review(requested_id)
+fact = inventory.observe(requested_id)
+@if fact.status == "error"
+    ? false -> fail "technical observation error"
+@else_if fact.status == "available" and fact.freshness == "current" and fact.conflict_status == "none"
+    draft = strict.draft(fact.id)
+    @wait approval
+    @if approval
+        out review.submit(draft)
+    @else
+        ? false -> fail "approval denied"
+    @end
+@else
+    draft = review.draft(fact.id)
+    @wait approval
+    @if approval
+        out review.submit(draft)
+    @else
+        ? false -> fail "approval denied"
+    @end
+@end
