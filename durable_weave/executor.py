@@ -318,11 +318,33 @@ class DurableExecutor:
         self._load(execution_id)
         assert self.log is not None
         ok, detail = self.log.verify_chain()
-        artifacts_ok, bad = True, []
-        for ev in self.log.events:
-            ref = ev["data"].get("result_ref") or ev["data"].get("output_ref")
-            if ref and not self.cas.verify(ref):
-                artifacts_ok, bad = False, bad + [ref]
+        # После compact результаты остаются в archive и/или snapshot.completed.
+        # Проверяем все семантические ссылки, а не только output активного окна.
+        import json
+        refs: set[str] = set()
+        snapshots: set[str] = set()
+        tables = ["events"]
+        if self.log.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='archive'"
+        ).fetchone():
+            tables.append("archive")
+        for table in tables:
+            for (raw,) in self.log.db.execute(f"SELECT data FROM {table}"):
+                data = json.loads(raw)
+                for key in ("input_ref", "result_ref", "output_ref", "snapshot_ref"):
+                    if data.get(key):
+                        refs.add(data[key])
+                if data.get("snapshot_ref"):
+                    snapshots.add(data["snapshot_ref"])
+        for ref in sorted(snapshots):
+            if self.cas.verify(ref):
+                snap = self.cas.get_json(ref)
+                refs.update(snap.get("completed", {}).values())
+                identity = snap.get("identity") or {}
+                if identity.get("input_ref"):
+                    refs.add(identity["input_ref"])
+        bad = [ref for ref in sorted(refs) if not self.cas.verify(ref)]
+        artifacts_ok = not bad
         status = "unknown"
         for ev in reversed(self.log.events):
             status = {"WorkflowCompleted": "COMPLETED", "WorkflowFailed": "FAILED",
