@@ -4,4 +4,4 @@ from .executor import DurableExecutor, ExecutionResult, WorkflowWaiting, Simulat
 from .saga import Saga
 
 __all__ = ["ContentAddressedStore", "DurableExecutor", "ExecutionResult", "WorkflowWaiting", "SimulatedCrash", "Saga"]
-__version__ = "0.1.0"
+__version__ = "0.1.11"

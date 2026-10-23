@@ -52,16 +52,32 @@ class SQLiteEventLog:
     def append_many(self, items: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
         """Групповой коммит: пачка событий одной транзакцией (один fsync на пачку)."""
         out = []
+        previous = self.last_hash
+        seq = self.events[-1]["seq"] + 1 if self.events else 0
+        for type_, data in items:
+            event = {"seq": seq, "type": type_, "data": data, "prev": previous}
+            event["hash"] = event_hash(previous, event)
+            out.append(event)
+            previous = event["hash"]
+            seq += 1
         with self.db:
-            for type_, data in items:
-                next_seq = self.events[-1]["seq"] + 1 if self.events else 0
-                event = {"seq": next_seq, "type": type_, "data": data, "prev": self.last_hash}
-                event["hash"] = event_hash(self.last_hash, event)
+            for event in out:
                 self.db.execute("INSERT INTO events VALUES (?,?,?,?,?)",
-                                (event["seq"], type_, json.dumps(data, ensure_ascii=False), event["prev"], event["hash"]))
-                self.events.append(event)
-                out.append(event)
+                                (event["seq"], event["type"], json.dumps(event["data"], ensure_ascii=False),
+                                 event["prev"], event["hash"]))
+        # Публикуем память только ПОСЛЕ успешного commit, включая его ошибки.
+        self.events.extend(out)
         return out
+
+    def history(self) -> list[dict[str, Any]]:
+        """Весь журнал для аварийного восстановления, включая архив compact."""
+        events = {}
+        if self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='archive'").fetchone():
+            for seq, typ, data, prev, h in self.db.execute(
+                    "SELECT seq,type,data,prev,hash FROM archive ORDER BY seq"):
+                events[seq] = {"seq": seq, "type": typ, "data": json.loads(data), "prev": prev, "hash": h}
+        events.update({event["seq"]: event for event in self.events})
+        return [events[seq] for seq in sorted(events)]
 
     def compact(self) -> dict:
         """Архивировать события до последнего StateSnapshot включительно.

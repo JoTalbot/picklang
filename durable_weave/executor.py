@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import sqlite3
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -125,26 +126,12 @@ class Context:
                                    "_requested_key": key, "_execution_id": self.execution_id})
             with ThreadPoolExecutor(max_workers=len(pending)) as pool:
                 done = dict(pool.map(run_one, pending.items()))
-            batch = []
-            for i in pending:  # коммиты канонично по объявленному порядку
+            frontier = []
+            for i in pending:
                 name, payload, key = pending[i]
-                result = done[i]
-                step_id = step(i, name, key)
-                ref = ex.cas.put_json({"activity": name, "step": step_id, "input_digest": _input_digest(payload), "result": result})
-                batch.append(("ActivityCompleted", {"step": step_id, "activity": name,
-                                                    "idempotency_key": key,
-                                                    "input_digest": _input_digest(payload),
-                                                    "result_ref": ref}))
-                results[i] = result
-            # весь frontier — одна транзакция (append_many), а не коммит на событие
-            append_many = getattr(ex.log, "append_many", None)
-            if append_many is not None:
-                append_many(batch)
-            else:
-                for type_, data in batch:
-                    ex.log.append(type_, data)
-            for _, data in batch:
-                ex._completed[data["step"]] = data["result_ref"]
+                frontier.append((step(i, name, key), name, payload, done[i], key))
+                results[i] = done[i]
+            ex._commit_frontier(frontier)
         return results
 
     def wait_signal(self, name: str) -> Any:
@@ -177,7 +164,10 @@ class DurableExecutor:
             raise ValueError("legacy parallel step IDs require explicit migration before replay")
 
     def _replay(self, step_id: str, payload: dict) -> Any:
-        stored = self.cas.get_json(self._completed[step_id])
+        ref = self._completed[step_id]
+        if not self.cas.verify(ref):
+            raise ValueError(f"corrupt replay result: {step_id}")
+        stored = self.cas.get_json(ref)
         digest = stored.get("input_digest") if isinstance(stored, dict) else None
         if digest is None and self.log is not None:
             digest = next((e["data"].get("input_digest") for e in self.log.events
@@ -196,14 +186,45 @@ class DurableExecutor:
             "input_digest": _input_digest(payload), "result_ref": result_ref,
         })
         self._completed[step_id] = result_ref
-        self._steps_done += 1
-        if self.snapshot_every and self._steps_done % self.snapshot_every == 0:
+        self._after_commit(1)
+        return result_ref
+
+    def _commit_frontier(self, calls: list[tuple]) -> None:
+        """Атомарный frontier sync/async: память меняется только после SQLite commit."""
+        assert self.log is not None
+        batch = []
+        for step_id, name, payload, result, key in calls:
+            digest = _input_digest(payload)
+            ref = self.cas.put_json({"activity": name, "step": step_id,
+                                     "input_digest": digest, "result": result})
+            batch.append(("ActivityCompleted", {"step": step_id, "activity": name,
+                          "idempotency_key": key, "input_digest": digest, "result_ref": ref}))
+        self.log.append_many(batch)
+        for _, data in batch:
+            self._completed[data["step"]] = data["result_ref"]
+        if batch:
+            self._after_commit(len(batch))
+
+    def _after_commit(self, count: int) -> None:
+        previous = self._steps_done
+        self._steps_done += count
+        if self.snapshot_every and previous // self.snapshot_every < self._steps_done // self.snapshot_every:
             snap_ref = self.cas.put_json({"seq": len(self.log.events), "completed": dict(self._completed),
                                           "signals": dict(self._signals), "identity": self._identity})
             self.log.append("StateSnapshot", {"snapshot_ref": snap_ref, "steps": self._steps_done})
         if self.crash_after is not None and self._steps_done >= self.crash_after:
             raise SimulatedCrash(f"simulated crash after {self._steps_done} committed activities")
-        return result_ref
+
+    def _read_snapshot(self, ref: str) -> dict:
+        if not self.cas.verify(ref):
+            raise ValueError("corrupt snapshot")
+        snap = self.cas.get_json(ref)
+        if (not isinstance(snap, dict) or not isinstance(snap.get("completed"), dict)
+                or not isinstance(snap.get("signals", {}), dict)
+                or (snap.get("identity") is not None and not isinstance(snap["identity"], dict))
+                or not all(isinstance(k, str) and isinstance(v, str) for k, v in snap["completed"].items())):
+            raise ValueError("invalid snapshot schema")
+        return snap
 
     # --- жизненный цикл исполнения -------------------------------------
     def _load(self, execution_id: str) -> None:
@@ -220,7 +241,8 @@ class DurableExecutor:
         for i in range(len(events) - 1, -1, -1):
             if events[i]["type"] == "StateSnapshot":
                 try:
-                    snap = self.cas.get_json(events[i]["data"]["snapshot_ref"])
+                    ref = events[i]["data"]["snapshot_ref"]
+                    snap = self._read_snapshot(ref)
                     self._completed = dict(snap["completed"])
                     self._signals = dict(snap.get("signals", {}))
                     self._identity = snap.get("identity")
@@ -243,8 +265,11 @@ class DurableExecutor:
                             self._identity = prior["data"]
                     self.snapshot_used = True
                     start = i + 1
-                except Exception:
-                    pass
+                except (KeyError, ValueError, TypeError, OSError):
+                    # Снимок — ускорение, не единственный источник истины.
+                    self._completed, self._signals, self._identity = {}, {}, None
+                    events = self.log.history()
+                    start = 0
                 break
         for ev in events[start:]:
             if ev["type"] == "WorkflowStarted":
@@ -253,6 +278,8 @@ class DurableExecutor:
                 self._completed[ev["data"]["step"]] = ev["data"]["result_ref"]
             elif ev["type"] == "SignalReceived":
                 self._signals[ev["data"]["name"]] = ev["data"]["payload"]
+
+        self._steps_done = len(self._completed)
 
     def run(self, execution_id: str, workflow: Callable[[Context, Any], Any], input_: Any,
             *, workflow_version: str | None = None) -> ExecutionResult:
@@ -263,11 +290,17 @@ class DurableExecutor:
                 return self._run_locked(execution_id, workflow, input_, workflow_version)
         except ExecutionBusy as busy:
             return ExecutionResult(execution_id, "BUSY", error=str(busy))
+        except (sqlite3.Error, OSError) as exc:
+            # Не пытаемся записать сообщение об ошибке в уже сломанное хранилище.
+            return ExecutionResult(execution_id, "FAILED", error=f"storage failure: {exc}")
 
     def _run_locked(self, execution_id: str, workflow: Callable[[Context, Any], Any],
                     input_: Any, workflow_version: str | None = None) -> ExecutionResult:
         self._load(execution_id)
         assert self.log is not None
+        chain_ok, detail = self.log.verify_chain()
+        if not chain_ok:
+            return ExecutionResult(execution_id, "FAILED", error=f"corrupt journal: {detail}")
         identity = {"workflow": workflow.__name__, "input_ref": self.cas.put_json(input_),
                     "workflow_version": workflow_version}
         if self._identity is not None:
@@ -318,11 +351,37 @@ class DurableExecutor:
         self._load(execution_id)
         assert self.log is not None
         ok, detail = self.log.verify_chain()
-        artifacts_ok, bad = True, []
-        for ev in self.log.events:
-            ref = ev["data"].get("result_ref") or ev["data"].get("output_ref")
-            if ref and not self.cas.verify(ref):
-                artifacts_ok, bad = False, bad + [ref]
+        # После compact результаты остаются в archive и/или snapshot.completed.
+        # Проверяем все семантические ссылки, а не только output активного окна.
+        import json
+        refs: set[str] = set()
+        snapshots: set[str] = set()
+        tables = ["events"]
+        if self.log.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='archive'"
+        ).fetchone():
+            tables.append("archive")
+        for table in tables:
+            for (raw,) in self.log.db.execute(f"SELECT data FROM {table}"):
+                data = json.loads(raw)
+                for key in ("input_ref", "result_ref", "output_ref", "snapshot_ref"):
+                    if data.get(key):
+                        refs.add(data[key])
+                if data.get("snapshot_ref"):
+                    snapshots.add(data["snapshot_ref"])
+        invalid_snapshots = set()
+        for ref in sorted(snapshots):
+            try:
+                snap = self._read_snapshot(ref)
+            except (KeyError, ValueError, TypeError, OSError):
+                invalid_snapshots.add(ref)
+                continue
+            refs.update(snap["completed"].values())
+            identity = snap.get("identity") or {}
+            if identity.get("input_ref"):
+                refs.add(identity["input_ref"])
+        bad = sorted(invalid_snapshots | {ref for ref in refs if not self.cas.verify(ref)})
+        artifacts_ok = not bad
         status = "unknown"
         for ev in reversed(self.log.events):
             status = {"WorkflowCompleted": "COMPLETED", "WorkflowFailed": "FAILED",

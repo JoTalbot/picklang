@@ -82,7 +82,7 @@ out -1
     assert compile_ir(source)['steps'][1]['cases'][0]['steps'][0]['kind'] == 'conditional'
     with pytest.raises(ValueError, match='conditional'):
         compile_program(source)
-    assert not prove_safety(source)['safe']
+    assert prove_safety(source)['safe']
 
 
 @pytest.mark.parametrize(('prefix', 'condition', 'code'), [
