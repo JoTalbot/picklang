@@ -14,6 +14,10 @@ DANGEROUS_SUFFIXES = ("charge", "refund", "send", "delete", "remove", "pay", "tr
 
 def prove_safety(source: str) -> dict[str, Any]:
     steps = parse(source)
+    if any(step.kind == "conditional" for step in steps):
+        return {"safe": False, "violations": [{"line": step.line,
+                "problem": "conditional proof is unsupported; review branches explicitly"}
+                for step in steps if step.kind == "conditional"], "proof": []}
     violations: list[dict[str, Any]] = []
     proof: list[str] = []
     approved_seen = False

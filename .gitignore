@@ -4,3 +4,7 @@ __pycache__/
 .run/
 dist/
 build/
+
+.venv/
+
+.cache/

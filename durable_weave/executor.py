@@ -68,7 +68,7 @@ class Context:
         ex = self._ex
         # Replay: результат уже закоммичен — обработчик НЕ вызываем.
         if step_id in ex._completed:
-            stored = ex.cas.get_json(ex._completed[step_id])
+            stored = ex._replay(step_id, payload)
             return stored.get("result") if isinstance(stored, dict) and "result" in stored else stored
         handler = ex.handlers.get(name)
         if handler is None:
@@ -105,10 +105,15 @@ class Context:
         ex = self._ex
         results: list[Any] = [None] * len(calls)
         pending: dict[int, tuple[str, dict, str]] = {}
+        ex._check_parallel_layout()
+        group = self._seq
+        self._seq += 1
+        def step(i, name, key):
+            return f"par{group}.{i}:{name}:{key}"
         for i, (name, payload, key) in enumerate(calls):
-            step_id = f"par{i}:{name}:{key}"
+            step_id = step(i, name, key)
             if step_id in ex._completed:
-                stored = ex.cas.get_json(ex._completed[step_id])
+                stored = ex._replay(step_id, payload)
                 results[i] = stored.get("result") if isinstance(stored, dict) else stored
             else:
                 pending[i] = (name, payload, key)
@@ -116,7 +121,7 @@ class Context:
             def run_one(item):
                 i, (name, payload, key) = item
                 handler = ex.handlers[name]
-                return i, handler({**payload, "_idempotency_key": f"par{i}:{name}:{key}",
+                return i, handler({**payload, "_idempotency_key": step(i, name, key),
                                    "_requested_key": key, "_execution_id": self.execution_id})
             with ThreadPoolExecutor(max_workers=len(pending)) as pool:
                 done = dict(pool.map(run_one, pending.items()))
@@ -124,13 +129,12 @@ class Context:
             for i in pending:  # коммиты канонично по объявленному порядку
                 name, payload, key = pending[i]
                 result = done[i]
-                step_id = f"par{i}:{name}:{key}"
-                ref = ex.cas.put_json({"activity": name, "step": step_id, "result": result})
+                step_id = step(i, name, key)
+                ref = ex.cas.put_json({"activity": name, "step": step_id, "input_digest": _input_digest(payload), "result": result})
                 batch.append(("ActivityCompleted", {"step": step_id, "activity": name,
                                                     "idempotency_key": key,
                                                     "input_digest": _input_digest(payload),
                                                     "result_ref": ref}))
-                ex._completed[step_id] = ref
                 results[i] = result
             # весь frontier — одна транзакция (append_many), а не коммит на событие
             append_many = getattr(ex.log, "append_many", None)
@@ -139,6 +143,8 @@ class Context:
             else:
                 for type_, data in batch:
                     ex.log.append(type_, data)
+            for _, data in batch:
+                ex._completed[data["step"]] = data["result_ref"]
         return results
 
     def wait_signal(self, name: str) -> Any:
@@ -165,10 +171,25 @@ class DurableExecutor:
         self._steps_done = 0
         self._seq_counter = 0        # для async-исполнителя: уникальность step_id внутри запуска
 
+    def _check_parallel_layout(self) -> None:
+        if any(key.startswith("par") and "." not in key.split(":", 1)[0]
+               for key in self._completed):
+            raise ValueError("legacy parallel step IDs require explicit migration before replay")
+
+    def _replay(self, step_id: str, payload: dict) -> Any:
+        stored = self.cas.get_json(self._completed[step_id])
+        digest = stored.get("input_digest") if isinstance(stored, dict) else None
+        if digest is None and self.log is not None:
+            digest = next((e["data"].get("input_digest") for e in self.log.events
+                           if e["type"] == "ActivityCompleted" and e["data"]["step"] == step_id), None)
+        if digest is not None and digest != _input_digest(payload):
+            raise ValueError(f"replay input mismatch: {step_id}")
+        return stored
+
     def _commit_activity(self, step_id: str, name: str, payload: dict, result: Any,
                          idempotency_key: str | None = None) -> str:
         """Commit point, общий для sync/async: CAS -> событие -> снимок по расписанию."""
-        result_ref = self.cas.put_json({"activity": name, "step": step_id, "result": result})
+        result_ref = self.cas.put_json({"activity": name, "step": step_id, "input_digest": _input_digest(payload), "result": result})
         assert self.log is not None
         self.log.append("ActivityCompleted", {
             "step": step_id, "activity": name, "idempotency_key": idempotency_key,
@@ -177,7 +198,8 @@ class DurableExecutor:
         self._completed[step_id] = result_ref
         self._steps_done += 1
         if self.snapshot_every and self._steps_done % self.snapshot_every == 0:
-            snap_ref = self.cas.put_json({"seq": len(self.log.events), "completed": dict(self._completed)})
+            snap_ref = self.cas.put_json({"seq": len(self.log.events), "completed": dict(self._completed),
+                                          "signals": dict(self._signals), "identity": self._identity})
             self.log.append("StateSnapshot", {"snapshot_ref": snap_ref, "steps": self._steps_done})
         if self.crash_after is not None and self._steps_done >= self.crash_after:
             raise SimulatedCrash(f"simulated crash after {self._steps_done} committed activities")
@@ -188,6 +210,8 @@ class DurableExecutor:
         self.log = SQLiteEventLog(self.workdir / "executions" / execution_id / "events.db")
         self._completed = {}
         self._signals = {}
+        self._identity = None
+        self._steps_done = 0
         self.snapshot_used = False
         self._seq_counter = 0
         events = self.log.events
@@ -198,32 +222,60 @@ class DurableExecutor:
                 try:
                     snap = self.cas.get_json(events[i]["data"]["snapshot_ref"])
                     self._completed = dict(snap["completed"])
+                    self._signals = dict(snap.get("signals", {}))
+                    self._identity = snap.get("identity")
+                    # Старые снимки не содержали сигналы: восстанавливаем префикс.
+                    prefix = events[:i + 1]
+                    if "signals" not in snap or "identity" not in snap:
+                        archived = self.log.db.execute(
+                            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='archive'"
+                        ).fetchone()
+                        if archived:
+                            import json
+                            prefix = [{"type": typ, "data": json.loads(data)}
+                                      for typ, data in self.log.db.execute(
+                                          "SELECT type,data FROM archive WHERE seq <= ? ORDER BY seq",
+                                          (events[i]["seq"],))] + prefix
+                    for prior in prefix:
+                        if prior["type"] == "SignalReceived":
+                            self._signals[prior["data"]["name"]] = prior["data"]["payload"]
+                        elif prior["type"] == "WorkflowStarted":
+                            self._identity = prior["data"]
                     self.snapshot_used = True
                     start = i + 1
                 except Exception:
                     pass
                 break
         for ev in events[start:]:
-            if ev["type"] == "ActivityCompleted":
+            if ev["type"] == "WorkflowStarted":
+                self._identity = ev["data"]
+            elif ev["type"] == "ActivityCompleted":
                 self._completed[ev["data"]["step"]] = ev["data"]["result_ref"]
             elif ev["type"] == "SignalReceived":
                 self._signals[ev["data"]["name"]] = ev["data"]["payload"]
 
-    def run(self, execution_id: str, workflow: Callable[[Context, Any], Any], input_: Any) -> ExecutionResult:
+    def run(self, execution_id: str, workflow: Callable[[Context, Any], Any], input_: Any,
+            *, workflow_version: str | None = None) -> ExecutionResult:
         # Один писатель на исполнение: иначе два процесса переигрывают журнал до
         # первого незакоммиченного шага и оба выполняют его обработчик.
         try:
             with execution_lock(self.workdir, execution_id):
-                return self._run_locked(execution_id, workflow, input_)
+                return self._run_locked(execution_id, workflow, input_, workflow_version)
         except ExecutionBusy as busy:
             return ExecutionResult(execution_id, "BUSY", error=str(busy))
 
     def _run_locked(self, execution_id: str, workflow: Callable[[Context, Any], Any],
-                    input_: Any) -> ExecutionResult:
+                    input_: Any, workflow_version: str | None = None) -> ExecutionResult:
         self._load(execution_id)
         assert self.log is not None
-        if not any(e["type"] == "WorkflowStarted" for e in self.log.events):
-            self.log.append("WorkflowStarted", {"workflow": workflow.__name__, "input_ref": self.cas.put_json(input_)})
+        identity = {"workflow": workflow.__name__, "input_ref": self.cas.put_json(input_),
+                    "workflow_version": workflow_version}
+        if self._identity is not None:
+            if any(self._identity.get(k) != identity[k] for k in identity):
+                return ExecutionResult(execution_id, "FAILED", error="replay workflow/input mismatch")
+        else:
+            self.log.append("WorkflowStarted", identity)
+            self._identity = identity
         ctx = Context(self, execution_id)
         try:
             output = workflow(ctx, input_)

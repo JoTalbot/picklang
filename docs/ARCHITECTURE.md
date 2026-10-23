@@ -19,7 +19,7 @@ LLM ──PICK (мало токенов)──► parser ──► Canonical IR 
 - **picklang/** — синтаксис, IR, интерпретатор, diff-патчи. Не знает про хранение.
 - **durable_weave/cas.py** — контентно-адресное хранилище SHA-256: дедупликация,
   атомарная публикация, verify пересчётом хэша.
-- **durable_weave/eventlog.py** — append-only журнал с хэш-цепочкой; digest
+- **durable_weave/sqlite_backend.py** — append-only журнал с хэш-цепочкой; digest
   исполнения = хэш последнего события.
 - **durable_weave/executor.py** — replay-исполнитель: коммит активности =
   CAS + событие; только после этого следующий шаг. Падение между шагами

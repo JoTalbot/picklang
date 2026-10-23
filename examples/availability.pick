@@ -1,0 +1,22 @@
+# Демонстрационный контракт фактов; адаптеры не выбирают ветвь.
+> availability(fact, requested_id)
+? fact.id == requested_id -> fail "identifier mismatch"
+@if fact.status == "available" or fact.status == "unknown" or fact.status == "conflict" or fact.status == "error"
+    @if fact.freshness == "current" or fact.freshness == "stale"
+        @if fact.conflict_status == "none" or fact.conflict_status == "present"
+            @if fact.status == "error"
+                ? false -> fail "technical error"
+            @else_if fact.status == "available" and fact.freshness == "current" and fact.conflict_status == "none"
+                out strict.draft(fact.id)
+            @else
+                out review.draft(fact.id)
+            @end
+        @else
+            ? false -> fail "invalid conflict_status"
+        @end
+    @else
+        ? false -> fail "invalid freshness"
+    @end
+@else
+    ? false -> fail "invalid status"
+@end

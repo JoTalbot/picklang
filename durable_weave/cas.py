@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -37,9 +38,16 @@ class ContentAddressedStore:
         path = self._path(ref)
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_suffix(".tmp")
-            tmp.write_bytes(data)
-            os.replace(tmp, path)  # атомарная публикация объекта
+            fd, name = tempfile.mkstemp(dir=path.parent, prefix=".cas-", suffix=".tmp")
+            tmp = Path(name)
+            try:
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(data)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(tmp, path)  # уникальный файл для каждого писателя
+            finally:
+                tmp.unlink(missing_ok=True)
         return ref
 
     def put_json(self, obj: Any) -> str:

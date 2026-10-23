@@ -25,21 +25,16 @@ def _sig_arity(fn) -> tuple[int, int] | None:
 
 
 def _expr_vars(expr):
-    if not isinstance(expr, dict):
-        return
-    if "var" in expr:
-        yield expr["var"]
-    if "get" in expr:
-        yield expr["get"].split(".")[0]
-    for v in expr.values():
-        if isinstance(v, dict):
-            yield from _expr_vars(v)
-        elif isinstance(v, list):
-            for item in v:
-                if isinstance(item, list):
-                    yield from _expr_vars(item[1]) if len(item) == 2 and isinstance(item[1], dict) else iter(())
-                elif isinstance(item, dict):
-                    yield from _expr_vars(item)
+    if isinstance(expr, dict):
+        if "var" in expr:
+            yield expr["var"]
+        if "get" in expr:
+            yield expr["get"].split(".")[0]
+        for value in expr.values():
+            yield from _expr_vars(value)
+    elif isinstance(expr, list):
+        for value in expr:
+            yield from _expr_vars(value)
 
 
 def _expr_calls(expr):
@@ -108,44 +103,124 @@ def check_ir(ir: dict[str, Any], registry: dict | None = None) -> list[dict[str,
                     diags.append({"line": line, "level": "error", "code": "ARITY",
                                   "message": f"'{name}' ждёт {lo}..{hi} аргументов, дано {argc}"})
 
-    for step in ir.get("steps", []):
-        line = step.get("line", 0)
-        if step["kind"] == "goal":
-            goals += 1
-            defined.update(step.get("params", []))
-            if goals > 1:
-                diags.append({"line": line, "level": "error", "code": "DUP_GOAL",
-                              "message": "цель > ... объявлена повторно"})
-        # expr шага проверяется до привязки цели, компенсация — после:
-        # она исполняется позже и законно ссылается на результат шага (p.tx).
-        for key in ("expr", "fail"):
-            if key in step:
-                scan(step[key], line)
-        if step["kind"] == "assign" and step.get("target"):
-            defined.add(step["target"])
-        if "compensation" in step:
-            scan(step["compensation"], line)
-        if step["kind"] == "parallel":
-            # Ветви объявляют свои цели: a = f(x) || b = g(x) -> a и b определены.
-            for target, branch_expr in step.get("branches", []):
-                scan(branch_expr, line)
-                if target:
-                    defined.add(target)
-        elif step["kind"] == "loop":
-            if step.get("loop_var"):
-                defined.add(step["loop_var"])
-            body = step.get("body") or {}
-            if body.get("expr") is not None:
-                scan(body["expr"], line)
-            if body.get("target"):
-                defined.add(body["target"])
-        elif step["kind"] == "donewhen":
-            for cond in step.get("conditions") or []:
-                scan(cond, line)
-        elif step["kind"] == "wait":
-            defined.add(step["signal"])
-        elif step["kind"] == "out":
-            has_out = True
+    shapes = {}
+
+    def error(line, code, message):
+        diags.append({"line": line, "level": "error", "code": code, "message": message})
+
+    def infer(expr, seen=frozenset()):
+        if not isinstance(expr, dict):
+            return None
+        if "lit" in expr:
+            return type(expr["lit"]).__name__
+        if "cmp" in expr or "bool" in expr:
+            return "bool"
+        if "var" in expr and expr["var"] in shapes and expr["var"] not in seen:
+            return infer(shapes[expr["var"]], seen | {expr["var"]})
+        if "map" in expr:
+            return "dict"
+        return None
+
+    def condition_type(expr, line, operand=False):
+        if not isinstance(expr, dict):
+            error(line, "CONDITION_TYPE", "неверное условие")
+            return
+        if "bool" in expr:
+            for child in expr["bool"][1]:
+                condition_type(child, line)
+        elif "cmp" in expr:
+            _, left, right = expr["cmp"]
+            condition_type(left, line, True)
+            condition_type(right, line, True)
+            a, b = infer(left), infer(right)
+            if a is not None and b is not None and a != b:
+                error(line, "CONDITION_TYPE", "несовместимые типы сравнения")
+        elif "call" in expr or "pipe" in expr or "map" in expr:
+            error(line, "IMPURE_CONDITION", "условие должно быть чистым")
+        else:
+            typ = infer(expr)
+            if typ is not None and ((not operand and typ != "bool") or typ in ("NoneType", "dict", "list")):
+                error(line, "CONDITION_TYPE", "условие не является определённым boolean")
+            if "get" in expr:
+                parts = expr["get"].split(".")
+                shape = shapes.get(parts[0])
+                for part in parts[1:]:
+                    if not shape:
+                        break  # динамические данные проверяет runtime или контракт
+                    fields = dict(shape["map"]) if "map" in shape else (shape.get("lit") if isinstance(shape.get("lit"), dict) else None)
+                    if fields is None:
+                        break
+                    if part not in fields:
+                        error(line, "UNKNOWN_FIELD", f"неизвестное поле {expr['get']}")
+                        break
+                    shape = fields[part] if "map" in shape else {"lit": fields[part]}
+
+    def process(items):
+        nonlocal has_out, goals
+        for step in items:
+            line = step.get("line", 0)
+            if step["kind"] == "conditional":
+                before = set(defined)
+                old_shapes = dict(shapes)
+                assigned_types = {}
+                for case in step.get("cases", []):
+                    defined.clear(); defined.update(before)
+                    shapes.clear(); shapes.update(old_shapes)
+                    condition = case.get("condition")
+                    if condition is not None:
+                        scan(condition, line)
+                        condition_type(condition, line)
+                    for child in case.get("steps", []):
+                        if child["kind"] == "assign":
+                            target = child.get("target")
+                            if target in before:
+                                error(line, "BRANCH_SCOPE", f"ветка не может менять внешнюю переменную {target}")
+                            inferred = infer(child.get("expr"))
+                            if target in assigned_types and inferred is not None and assigned_types[target] not in (None, inferred):
+                                error(line, "BRANCH_TYPE", f"несовместимые присваивания {target}")
+                            assigned_types[target] = inferred
+                    process(case.get("steps", []))
+                defined.clear(); defined.update(before)
+                shapes.clear(); shapes.update(old_shapes)
+                continue
+            if step["kind"] == "goal":
+                goals += 1
+                defined.update(step.get("params", []))
+                if goals > 1:
+                    diags.append({"line": line, "level": "error", "code": "DUP_GOAL",
+                                  "message": "цель > ... объявлена повторно"})
+            # expr шага проверяется до привязки цели, компенсация — после:
+            # она исполняется позже и законно ссылается на результат шага (p.tx).
+            for key in ("expr", "fail"):
+                if key in step:
+                    scan(step[key], line)
+            if step["kind"] == "assign" and step.get("target"):
+                defined.add(step["target"])
+                shapes[step["target"]] = step.get("expr")
+            if "compensation" in step:
+                scan(step["compensation"], line)
+            if step["kind"] == "parallel":
+                # Ветви объявляют свои цели: a = f(x) || b = g(x) -> a и b определены.
+                for target, branch_expr in step.get("branches", []):
+                    scan(branch_expr, line)
+                    if target:
+                        defined.add(target)
+            elif step["kind"] == "loop":
+                if step.get("loop_var"):
+                    defined.add(step["loop_var"])
+                body = step.get("body") or {}
+                if body.get("expr") is not None:
+                    scan(body["expr"], line)
+                if body.get("target"):
+                    defined.add(body["target"])
+            elif step["kind"] == "donewhen":
+                for cond in step.get("conditions") or []:
+                    scan(cond, line)
+            elif step["kind"] == "wait":
+                defined.add(step["signal"])
+            elif step["kind"] == "out":
+                has_out = True
+    process(ir.get("steps", []))
     if not has_out:
         diags.append({"line": 0, "level": "error", "code": "NO_OUT",
                       "message": "в программе нет out — результат не определён"})
@@ -167,7 +242,18 @@ def check_contracts(source: str, contracts: dict[str, dict]) -> list[dict[str, A
     ir = compile_ir(source)
     diags: list[dict[str, Any]] = []
     produced_by: dict[str, str] = {}
-    for step in ir["steps"]:
+    def flattened(items):
+        for item in items:
+            if item["kind"] == "conditional":
+                before = dict(produced_by)
+                for case in item["cases"]:
+                    produced_by.clear(); produced_by.update(before)
+                    yield {"kind": "condition", "line": item["line"], "expr": case["condition"]}
+                    yield from flattened(case["steps"])
+                produced_by.clear(); produced_by.update(before)
+            else:
+                yield item
+    for step in flattened(ir["steps"]):
         expr = step.get("expr") or {}
         if step["kind"] == "assign" and isinstance(expr, dict) and "call" in expr:
             produced_by[step.get("target")] = expr["call"]
@@ -182,7 +268,7 @@ def check_contracts(source: str, contracts: dict[str, dict]) -> list[dict[str, A
                     fn = produced_by.get(root)
                     spec = contracts.get(fn or "", {})
                     if fn and spec.get("returns") and field not in spec["returns"]:
-                        diags.append({"line": step["line"], "level": "warning", "code": "UNKNOWN_FIELD",
+                        diags.append({"line": step["line"], "level": "error" if step["kind"] == "condition" else "warning", "code": "UNKNOWN_FIELD",
                                       "message": f"у результата {fn} нет поля .{field}; есть: {spec['returns']}"})
                 for v in e.values():
                     if isinstance(v, dict): walk(v)
@@ -217,7 +303,10 @@ def _call_names_in_expr(expr):
 def _effect_steps(steps):
     """Шаги, у которых вообще могут быть эффект и компенсация, включая тело цикла."""
     for s in steps:
-        if s.kind == "loop" and s.body is not None:
+        if s.kind == "conditional":
+            for _, body in s.cases:
+                yield from _effect_steps(body)
+        elif s.kind == "loop" and s.body is not None:
             yield from _effect_steps([s.body])
         elif s.kind in ("assign", "expr"):
             yield s

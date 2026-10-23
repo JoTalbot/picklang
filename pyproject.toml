@@ -27,3 +27,5 @@ include = ["picklang*", "durable_weave*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/"]
+
+markers = ["temporal: integration tests requiring the Temporal SDK and test server"]

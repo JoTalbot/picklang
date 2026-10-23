@@ -13,6 +13,13 @@
 опциональный backend для долгих и распределённых workflow; для обычной разработки
 и тестов отдельный Temporal Service не требуется.
 
+## Навигация
+
+- [Архитектура](docs/ARCHITECTURE.md) · [Язык](docs/LANGUAGE.md)
+- [Контракт восстановления и ограничения](docs/RELIABILITY.md)
+- [Методика бенчмарков](docs/BENCHMARKS.md) · [Парное A/B](docs/PAIRED_AB.md)
+- [История релизов](RELEASE_NOTES.md)
+
 ## Быстрый старт
 
 ```bash
