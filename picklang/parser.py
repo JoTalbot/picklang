@@ -60,8 +60,9 @@ def _parse_expr(text: str, line: int, raw: str, depth: int = 0):
     if cmp_op:
         op, idx = cmp_op
         return ("cmp", op, _parse_expr(text[:idx], line, raw, depth + 1), _parse_expr(text[idx + len(op):], line, raw, depth + 1))
-    if ">>" in text:
-        return ("pipe", [_parse_expr(part, line, raw, depth + 1) for part in _split_top(text, ">>")])
+    pipe_parts = _split_top(text, ">>")
+    if len(pipe_parts) > 1:
+        return ("pipe", [_parse_expr(part, line, raw, depth + 1) for part in pipe_parts])
     m = re.fullmatch(r"([A-Za-z_][\w.]*)\((.*)\)", text, re.S)
     if m:
         args_text = m.group(2).strip()
@@ -98,19 +99,32 @@ def _find_cmp(text: str):
     while i < len(text):
         ch = text[i]
         if quote:
-            if ch == "\\":
-                i += 2; continue
-            if ch == quote: quote = None
-            i += 1; continue
-        if ch in "\"'": quote = ch; i += 1; continue
-        if ch in "([{": depth += 1
-        elif ch in ")]}": depth -= 1
+            if ch == "\\" and i + 1 < len(text):
+                i += 2
+                continue
+            if text.startswith(quote, i):
+                i += len(quote)
+                quote = None
+                continue
+            i += 1
+            continue
+        if ch in "\"'":
+            quote = ch * 3 if text.startswith(ch * 3, i) else ch
+            i += len(quote)
+            continue
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
         elif depth == 0:
             for op in ("==", "!=", ">=", "<="):
-                if text.startswith(op, i): return op, i
+                if text.startswith(op, i):
+                    return op, i
             if text.startswith(">>", i):
-                i += 2; continue
-            if ch in "><": return ch, i
+                i += 2
+                continue
+            if ch in "><":
+                return ch, i
         i += 1
     return None
 
@@ -121,24 +135,68 @@ def _split_top(text: str, sep: str) -> list[str]:
     while i < len(text):
         ch = text[i]
         if quote:
-            cur += ch
             if ch == "\\" and i + 1 < len(text):
-                cur += text[i + 1]; i += 2; continue
-            if ch == quote:
+                cur += text[i:i + 2]
+                i += 2
+                continue
+            if text.startswith(quote, i):
+                cur += quote
+                i += len(quote)
                 quote = None
+                continue
+            cur += ch
             i += 1
             continue
         if ch in "\"'":
-            quote = ch; cur += ch; i += 1; continue
+            quote = ch * 3 if text.startswith(ch * 3, i) else ch
+            cur += quote
+            i += len(quote)
+            continue
         if ch in "([{":
             depth += 1
         elif ch in ")]}":
             depth -= 1
         if depth == 0 and text.startswith(sep, i):
-            parts.append(cur); cur = ""; i += len(sep); continue
-        cur += ch; i += 1
+            parts.append(cur)
+            cur = ""
+            i += len(sep)
+            continue
+        cur += ch
+        i += 1
     parts.append(cur)
     return [p.strip() for p in parts if p.strip() != ""]
+
+
+def _find_assignment(text: str) -> int | None:
+    """Find a single top-level assignment operator outside quoted literals."""
+    depth, quote, i = 0, None, 0
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            if ch == "\\" and i + 1 < len(text):
+                i += 2
+                continue
+            if text.startswith(quote, i):
+                i += len(quote)
+                quote = None
+                continue
+            i += 1
+            continue
+        if ch in "\"'":
+            quote = ch * 3 if text.startswith(ch * 3, i) else ch
+            i += len(quote)
+            continue
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif depth == 0 and ch == "=":
+            prev = text[i - 1] if i else ""
+            nxt = text[i + 1] if i + 1 < len(text) else ""
+            if prev not in "=!<>" and nxt != "=":
+                return i
+        i += 1
+    return None
 
 
 def _parse_condition(text: str, line: int, raw: str, depth: int = 0):
@@ -289,11 +347,13 @@ def _parse_lines(source: str, line_offset: int = 0) -> list[Step]:
             exprs = [_parse_expr(e, lineno, raw) for e in _split_top(line[len("done when:"):], ",")]
             steps.append(Step("donewhen", lineno, expr=exprs))
             continue
-        if " || " in line:
+        parallel_parts = _split_top(line, "||")
+        if len(parallel_parts) > 1:
             branches = []
-            for part in _split_top(line, "||"):
-                if "=" in part:
-                    lhs, rhs = part.split("=", 1)
+            for part in parallel_parts:
+                assign_at = _find_assignment(part)
+                if assign_at is not None:
+                    lhs, rhs = part[:assign_at], part[assign_at + 1:]
                     branches.append((lhs.strip(), _parse_expr(rhs, lineno, raw)))
                 else:
                     branches.append((None, _parse_expr(part, lineno, raw)))
@@ -309,8 +369,9 @@ def _parse_lines(source: str, line_offset: int = 0) -> list[Step]:
         m = re.search(r"\s@fx\s+(read|write|money|irreversible)\s*$", line)
         if m:
             effect, line = m.group(1), line[:m.start()]
-        if "=" in line and not line.startswith("="):
-            lhs, rhs = line.split("=", 1)
+        assign_at = _find_assignment(line)
+        if assign_at is not None:
+            lhs, rhs = line[:assign_at], line[assign_at + 1:]
             target = lhs.strip()
             if not re.fullmatch(r"[A-Za-z_]\w*", target):
                 raise PickSyntaxError(lineno, raw, "слева от = должно быть одно имя переменной")

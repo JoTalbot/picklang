@@ -1,5 +1,4 @@
 import asyncio
-import time
 
 import pytest
 
@@ -45,14 +44,16 @@ def test_3_group_commit_and_sampled_verify(tmp_path):
 def test_4_async_executor_parallel(tmp_path):
     from durable_weave.async_executor import AsyncDurableExecutor
     async def main():
+        barrier = asyncio.Barrier(2)
+
         async def slow(p):
-            await asyncio.sleep(0.1)
+            await asyncio.wait_for(barrier.wait(), timeout=1.0)
             return p["v"]
+
         ex = AsyncDurableExecutor(tmp_path, {"a": slow, "b": slow})
         ex._load("e1")
-        t0 = time.perf_counter()
         out = await ex.parallel([("a", {"v": 1}, "a"), ("b", {"v": 2}, "b")])
-        assert out == [1, 2] and time.perf_counter() - t0 < 0.19 and ex.verify("e1")
+        assert out == [1, 2] and ex.verify("e1")
     asyncio.run(main())
 
 
