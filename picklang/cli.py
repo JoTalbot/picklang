@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -13,10 +14,60 @@ def _read(path):
     return Path(path).read_text(encoding="utf-8")
 
 
+def _normalize_code_segment(segment: str) -> str:
+    """Normalize PICK operators without touching quoted literal contents."""
+    segment = re.sub(r"(?<![=!<>])\s*=\s*(?!=)", " = ", segment)
+    segment = re.sub(r"\s*>>\s*", " >> ", segment)
+    segment = re.sub(r"\s*->\s*", " -> ", segment)
+    segment = re.sub(r"\s+\|\|\s+", " || ", segment)
+    return re.sub(r" +", " ", segment)
+
+
+def _format_line_preserving_strings(line: str) -> str:
+    parts: list[str] = []
+    code: list[str] = []
+    quote: str | None = None
+    i = 0
+
+    def flush_code() -> None:
+        if code:
+            parts.append(_normalize_code_segment("".join(code)))
+            code.clear()
+
+    while i < len(line):
+        if quote is not None:
+            if line[i] == "\\" and i + 1 < len(line):
+                parts.append(line[i:i + 2])
+                i += 2
+                continue
+            if line.startswith(quote, i):
+                parts.append(quote)
+                i += len(quote)
+                quote = None
+                continue
+            parts.append(line[i])
+            i += 1
+            continue
+
+        ch = line[i]
+        if ch in ("\"", "'"):
+            flush_code()
+            quote = ch * 3 if line.startswith(ch * 3, i) else ch
+            parts.append(quote)
+            i += len(quote)
+            continue
+        code.append(ch)
+        i += 1
+
+    flush_code()
+    return "".join(parts)
+
+
 def format_source(source: str) -> str:
     """Канонический форматтер: один смысл — один текст — один digest.
 
-    Нормализует пробелы вокруг операторов и отступы; строки не трогает.
+    Нормализует пробелы вокруг операторов; содержимое строковых литералов
+    сохраняет, включая пробелы и операторы.
     """
     out = []
     for raw in source.splitlines():
@@ -26,15 +77,7 @@ def format_source(source: str) -> str:
         if line.startswith("#"):
             out.append(line)
             continue
-        for old, new in ((" =", " ="), ("= ", "= "), ("  ", " ")):
-            pass
-        import re
-        line = re.sub(r"(?<![=!<>])\s*=\s*(?!=)", " = ", line)
-        line = re.sub(r"\s*>>\s*", " >> ", line)
-        line = re.sub(r"\s*->\s*", " -> ", line)
-        line = re.sub(r"\s+\|\|\s+", " || ", line)
-        line = re.sub(r" +", " ", line)
-        out.append(line)
+        out.append(_format_line_preserving_strings(line))
     return "\n".join(out) + "\n"
 
 
