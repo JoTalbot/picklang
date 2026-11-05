@@ -1,6 +1,7 @@
 """MCP-клиент: таймаут на молчащий сервер и нормальный roundtrip."""
 from __future__ import annotations
 
+import subprocess
 import sys
 import time
 
@@ -61,3 +62,35 @@ def test_mcp_pool_closes_process_when_handshake_fails(tmp_path, monkeypatch):
     assert clients[0].proc.poll() is not None
     assert pool._clients == {}
     pool.close_all()
+
+def test_mcp_client_kills_process_when_terminate_times_out():
+    from picklang.mcp import McpClient
+
+    events = []
+
+    class StubbornProcess:
+        killed = False
+
+        def terminate(self):
+            events.append("terminate")
+
+        def wait(self, timeout):
+            events.append("wait")
+            if not self.killed:
+                raise subprocess.TimeoutExpired("mcp", timeout)
+
+        def kill(self):
+            events.append("kill")
+            self.killed = True
+
+    class Reader:
+        def join(self, timeout):
+            events.append("join")
+
+    client = object.__new__(McpClient)
+    client.proc = StubbornProcess()
+    client._reader = Reader()
+    client.close()
+
+    assert events == ["terminate", "wait", "kill", "wait", "join"]
+
