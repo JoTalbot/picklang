@@ -256,3 +256,33 @@ def test_missing_replay_event_fields_fail_closed(tmp_path, event_type, payload):
     assert verification["verified"] is False
     assert "schema" in verification["chain_detail"]
     assert calls == [1]
+
+
+def test_missing_replay_fields_in_archive_fail_closed(tmp_path):
+    calls = []
+
+    def workflow(ctx, inp):
+        return ctx.execute_activity("f")
+
+    ex = DurableExecutor(
+        tmp_path, {"f": lambda p: calls.append(1) or 42}, snapshot_every=1
+    )
+    assert ex.run("e", workflow, {}).status == "COMPLETED"
+    ex.log.compact()
+    with ex.log.db:
+        ex.log.db.execute(
+            "UPDATE archive SET data=? WHERE type='ActivityCompleted'",
+            (json.dumps({"activity": "f", "result_ref": "0" * 64}),),
+        )
+
+    result = DurableExecutor(
+        tmp_path, {"f": lambda p: calls.append(1) or 99}
+    ).run("e", workflow, {})
+    assert result.status == "FAILED"
+    assert "invalid ActivityCompleted schema" in result.error
+
+    verification = DurableExecutor(tmp_path, {}).verify("e")
+    assert verification["status"] == "CORRUPT"
+    assert verification["verified"] is False
+    assert "invalid ActivityCompleted schema" in verification["chain_detail"]
+    assert calls == [1]
