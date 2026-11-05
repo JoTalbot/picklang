@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sqlite3
 
 import pytest
@@ -215,4 +216,43 @@ def test_non_object_event_json_fails_closed_in_run_and_verify(tmp_path, location
     assert verification["status"] == "CORRUPT"
     assert verification["verified"] is False
     assert "invalid event schema" in verification["chain_detail"]
+    assert calls == [1]
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload"),
+    [
+        ("ActivityCompleted", {"activity": "f", "result_ref": "0" * 64}),
+        ("SignalReceived", {"name": "go"}),
+        ("StateSnapshot", {"steps": 1}),
+        ("WorkflowCompleted", {}),
+    ],
+)
+def test_missing_replay_event_fields_fail_closed(tmp_path, event_type, payload):
+    calls = []
+
+    def workflow(ctx, inp):
+        return ctx.execute_activity("f")
+
+    ex = DurableExecutor(
+        tmp_path, {"f": lambda p: calls.append(1) or 42}, snapshot_every=1
+    )
+    assert ex.run("e", workflow, {}).status == "COMPLETED"
+    ex.deliver_signal("e", "go", True)
+    with ex.log.db:
+        ex.log.db.execute(
+            "UPDATE events SET data=? WHERE type=?",
+            (json.dumps(payload), event_type),
+        )
+
+    result = DurableExecutor(
+        tmp_path, {"f": lambda p: calls.append(1) or 99}
+    ).run("e", workflow, {})
+    assert result.status == "FAILED"
+    assert "invalid" in result.error and "schema" in result.error
+
+    verification = DurableExecutor(tmp_path, {}).verify("e")
+    assert verification["status"] == "CORRUPT"
+    assert verification["verified"] is False
+    assert "schema" in verification["chain_detail"]
     assert calls == [1]
