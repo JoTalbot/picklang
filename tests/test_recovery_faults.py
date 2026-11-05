@@ -188,3 +188,31 @@ def test_malformed_archived_event_json_stops_run_before_handler(tmp_path):
     assert result.status == 'FAILED'
     assert 'corrupt journal: invalid JSON' in result.error
     assert calls == [1]
+
+
+@pytest.mark.parametrize("location", ["events", "archive"])
+def test_non_object_event_json_fails_closed_in_run_and_verify(tmp_path, location):
+    calls = []
+
+    def workflow(ctx, inp):
+        return ctx.execute_activity("f")
+
+    ex = DurableExecutor(tmp_path, {"f": lambda p: calls.append(1) or 42},
+                         snapshot_every=1 if location == "archive" else None)
+    assert ex.run("e", workflow, {}).status == "COMPLETED"
+    if location == "archive":
+        ex.log.compact()
+        table = "archive"
+    else:
+        table = "events"
+    with ex.log.db:
+        ex.log.db.execute(f"UPDATE {table} SET data='[]' WHERE seq=0")
+
+    result = DurableExecutor(tmp_path, {"f": lambda p: calls.append(1) or 99}).run("e", workflow, {})
+    assert result.status == "FAILED"
+    assert "invalid event schema" in result.error
+    verification = DurableExecutor(tmp_path, {}).verify("e")
+    assert verification["status"] == "CORRUPT"
+    assert verification["verified"] is False
+    assert "invalid event schema" in verification["chain_detail"]
+    assert calls == [1]
