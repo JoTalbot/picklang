@@ -316,8 +316,12 @@ def test_unreadable_cas_object_fails_closed_in_verify(tmp_path, monkeypatch):
     assert ex.run("e", workflow, {}).status == "COMPLETED"
     ref = next(iter(ex._completed.values()))
 
-    def unreadable(_ref):
-        raise PermissionError("injected unreadable CAS object")
+    original_get_bytes = ex.cas.get_bytes
+
+    def unreadable(target_ref):
+        if target_ref == ref:
+            raise PermissionError("injected unreadable CAS object")
+        return original_get_bytes(target_ref)
 
     monkeypatch.setattr(ex.cas, "get_bytes", unreadable)
     result = ex.verify("e")
