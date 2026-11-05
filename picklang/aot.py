@@ -23,7 +23,9 @@ def _fused_top_fields(items, n, *names):
     """top и fields одним проходом: промежуточный список не материализуется."""
     out = []
     for item in list(items)[: int(n)]:
-        out.append({k: item.get(k) for k in names} if isinstance(item, dict) else item)
+        # Delegate to the canonical stdlib function so nested lists retain
+        # fields() recursive semantics as well as ordinary dict projection.
+        out.append(_fields(item, *names))
     return out
 
 
