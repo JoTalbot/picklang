@@ -306,3 +306,22 @@ def test_corrupt_sqlite_database_fails_closed_in_run_and_verify(tmp_path):
     assert verification["status"] == "CORRUPT"
     assert verification["verified"] is False
     assert "invalid SQLite journal" in verification["chain_detail"]
+
+
+def test_unreadable_cas_object_fails_closed_in_verify(tmp_path, monkeypatch):
+    def workflow(ctx, inp):
+        return ctx.execute_activity("f")
+
+    ex = DurableExecutor(tmp_path, {"f": lambda p: 42})
+    assert ex.run("e", workflow, {}).status == "COMPLETED"
+    ref = next(iter(ex._completed.values()))
+
+    def unreadable(_ref):
+        raise PermissionError("injected unreadable CAS object")
+
+    monkeypatch.setattr(ex.cas, "get_bytes", unreadable)
+    result = ex.verify("e")
+    assert result["status"] == "COMPLETED"
+    assert result["artifacts_ok"] is False
+    assert result["bad_artifacts"] == [ref]
+    assert result["verified"] is False
