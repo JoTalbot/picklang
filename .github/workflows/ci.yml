@@ -73,6 +73,25 @@ jobs:
           assert list(Path("dist").glob("*.tar.gz")), "source distribution was not produced"
           print("Wheel and source distribution built successfully.")
           PY
+      - name: Smoke-test built wheel and CLI in a clean environment
+        run: |
+          set -euo pipefail
+          wheel_venv="$(mktemp -d)"
+          python -m venv "$wheel_venv"
+          "$wheel_venv/bin/python" -m pip install --no-deps dist/*.whl
+          (
+            cd "$RUNNER_TEMP"
+            "$wheel_venv/bin/pick" --help
+            "$wheel_venv/bin/python" - <<'PY'
+          import importlib.metadata
+          import picklang
+          import durable_weave
+
+          installed = importlib.metadata.version("picklang")
+          assert picklang.__version__ == durable_weave.__version__ == installed
+          print(f"Clean wheel import/version check passed: {installed}")
+          PY
+          )
 
   tests:
     name: Unit tests and package checks
