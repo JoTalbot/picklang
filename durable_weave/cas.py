@@ -80,7 +80,7 @@ class ContentAddressedStore:
         """Пересчитать хэш хранимых байтов и сравнить с адресом."""
         try:
             return sha256_hex(self.get_bytes(ref)) == ref
-        except (KeyError, ValueError):
+        except (KeyError, ValueError, OSError):
             return False
 
     def stats(self) -> dict[str, Any]:
