@@ -15,6 +15,29 @@ from .cas import canonical_json, sha256_hex
 GENESIS = "0" * 64
 
 
+class JournalCorruptionError(ValueError):
+    """Persisted event row violates the journal storage contract."""
+
+
+def decode_event(seq: Any, typ: Any, raw_data: Any, prev: Any, digest: Any) -> dict[str, Any]:
+    """Decode and validate one persisted event before it enters replay state."""
+    if isinstance(seq, bool) or not isinstance(seq, int) or seq < 0:
+        raise JournalCorruptionError("invalid event schema: seq must be a non-negative integer")
+    if not isinstance(typ, str) or not typ:
+        raise JournalCorruptionError(f"event {seq}: invalid event schema: type must be non-empty text")
+    try:
+        data = json.loads(raw_data) if isinstance(raw_data, (str, bytes, bytearray)) else raw_data
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise JournalCorruptionError(f"event {seq}: invalid JSON") from exc
+    if not isinstance(data, dict):
+        raise JournalCorruptionError(f"event {seq}: invalid event schema: data must be an object")
+    if not isinstance(prev, str) or len(prev) != 64 or any(ch not in "0123456789abcdef" for ch in prev):
+        raise JournalCorruptionError(f"event {seq}: invalid event schema: prev must be a SHA-256 digest")
+    if not isinstance(digest, str) or len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+        raise JournalCorruptionError(f"event {seq}: invalid event schema: hash must be a SHA-256 digest")
+    return {"seq": seq, "type": typ, "data": data, "prev": prev, "hash": digest}
+
+
 def event_hash(prev_hash: str, event_without_hash: dict[str, Any]) -> str:
     return sha256_hex(prev_hash.encode() + canonical_json(event_without_hash))
 
@@ -32,7 +55,7 @@ class SQLiteEventLog:
         self.db.commit()
         self.events: list[dict[str, Any]] = []
         for seq, typ, data, prev, h in self.db.execute("SELECT seq,type,data,prev,hash FROM events ORDER BY seq"):
-            self.events.append({"seq": seq, "type": typ, "data": json.loads(data), "prev": prev, "hash": h})
+            self.events.append(decode_event(seq, typ, data, prev, h))
 
     @property
     def last_hash(self) -> str:
@@ -75,7 +98,7 @@ class SQLiteEventLog:
         if self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='archive'").fetchone():
             for seq, typ, data, prev, h in self.db.execute(
                     "SELECT seq,type,data,prev,hash FROM archive ORDER BY seq"):
-                events[seq] = {"seq": seq, "type": typ, "data": json.loads(data), "prev": prev, "hash": h}
+                events[seq] = decode_event(seq, typ, data, prev, h)
         events.update({event["seq"]: event for event in self.events})
         return [events[seq] for seq in sorted(events)]
 
@@ -140,7 +163,7 @@ class SQLiteEventLog:
                 "SELECT seq,type,data,prev,hash FROM archive ORDER BY seq"
             )
             for seq, typ, data, prev_hash, h in rows:
-                ev = {"seq": seq, "type": typ, "data": json.loads(data), "prev": prev_hash, "hash": h}
+                ev = decode_event(seq, typ, data, prev_hash, h)
                 prior = by_seq.get(seq)
                 if prior is not None and prior != ev:
                     return False, f"archive seq {seq}: conflicting duplicate"
