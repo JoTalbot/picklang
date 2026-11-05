@@ -139,3 +139,21 @@ def test_async_failed_frontier_waits_for_other_started_handlers(tmp_path):
         assert completed == ['settled']
         assert ex._completed == {} and ex.log.events == []
     asyncio.run(run())
+
+def test_malformed_event_json_fails_closed_in_run_and_verify(tmp_path):
+    calls = []
+    def workflow(ctx, inp):
+        return ctx.execute_activity('f')
+    ex = DurableExecutor(tmp_path, {'f': lambda p: calls.append(1) or 42})
+    assert ex.run('e', workflow, {}).status == 'COMPLETED'
+    db_path = tmp_path / 'executions' / 'e' / 'events.db'
+    with sqlite3.connect(db_path) as db:
+        db.execute("UPDATE events SET data='{' WHERE seq=0")
+
+    result = DurableExecutor(tmp_path, {'f': lambda p: calls.append(1) or 99}).run('e', workflow, {})
+    assert result.status == 'FAILED'
+    assert 'corrupt journal: invalid JSON' in result.error
+    verification = DurableExecutor(tmp_path, {}).verify('e')
+    assert verification['status'] == 'CORRUPT'
+    assert verification['verified'] is False
+    assert calls == [1]
