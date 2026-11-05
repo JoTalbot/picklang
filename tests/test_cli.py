@@ -4,9 +4,9 @@ from picklang.cli import format_source
 
 def test_formatter_preserves_string_literal_contents_and_semantics():
     literals = [
-        ('"a  b = c -> f"', "a  b = c -> f"),
+        ('"a  b = c >> d -> e || f"', "a  b = c >> d -> e || f"),
         ("'it\\'s  x = y'", "it's  x = y"),
-        ('"""triple  = and ->"""', "triple  = and ->"),
+        ('"""triple  = >> -> ||"""', "triple  = >> -> ||"),
     ]
 
     for literal, expected in literals:
