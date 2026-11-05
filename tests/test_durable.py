@@ -67,8 +67,8 @@ def test_cas_rejects_path_traversal_references(tmp_path):
 
 
 @pytest.mark.parametrize("ref", ["", "a" * 63, "a" * 65, "A" * 64, "g" * 64, None, 123])
-def test_cas_rejects_malformed_references(ref):
-    cas = ContentAddressedStore("unused-cas-root")
+def test_cas_rejects_malformed_references(tmp_path, ref):
+    cas = ContentAddressedStore(tmp_path / "cas")
     with pytest.raises(ValueError, match="invalid CAS reference"):
         cas._path(ref)
     assert cas.has(ref) is False
