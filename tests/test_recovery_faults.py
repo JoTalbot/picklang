@@ -171,3 +171,20 @@ def test_malformed_event_json_fails_closed_in_run_and_verify(tmp_path):
     assert verification['status'] == 'CORRUPT'
     assert verification['verified'] is False
     assert calls == [1]
+
+def test_malformed_archived_event_json_stops_run_before_handler(tmp_path):
+    calls = []
+
+    def workflow(ctx, inp):
+        return ctx.execute_activity('f')
+
+    ex = DurableExecutor(tmp_path, {'f': lambda p: calls.append(1) or 42}, snapshot_every=1)
+    assert ex.run('e', workflow, {}).status == 'COMPLETED'
+    ex.log.compact()
+    with ex.log.db:
+        ex.log.db.execute("UPDATE archive SET data='{' WHERE seq=0")
+
+    result = DurableExecutor(tmp_path, {'f': lambda p: calls.append(1) or 99}).run('e', workflow, {})
+    assert result.status == 'FAILED'
+    assert 'corrupt journal: invalid JSON' in result.error
+    assert calls == [1]
