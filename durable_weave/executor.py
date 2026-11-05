@@ -276,7 +276,8 @@ class DurableExecutor:
         self.snapshot_used = False
         self._seq_counter = 0
         events = self.log.events
-        for event in events:
+        # Validate archived rows too: compaction must not hide malformed replay history.
+        for event in self.log.history():
             _validate_executor_event(event)
         start = 0
         # П.1: последний снимок даёт completed-карту сразу; обрабатываем только хвост после него
@@ -438,6 +439,7 @@ class DurableExecutor:
                 for seq, typ, raw, prev, digest in self.log.db.execute(
                         f"SELECT seq,type,data,prev,hash FROM {table}"):
                     event = decode_event(seq, typ, raw, prev, digest)
+                    _validate_executor_event(event)
                     data = event["data"]
                     for key in ("input_ref", "result_ref", "output_ref", "snapshot_ref"):
                         if data.get(key):
