@@ -89,7 +89,22 @@ class McpClient:
     def close(self) -> None:
         try:
             self.proc.terminate()
+        except Exception:
+            # The process may already have exited; still wait/reap it below.
+            pass
+        try:
             self.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            # A server may ignore SIGTERM. Escalate so a failed MCP handshake
+            # cannot leave a child process running indefinitely.
+            try:
+                self.proc.kill()
+            except Exception:
+                pass
+            try:
+                self.proc.wait(timeout=5)
+            except Exception:
+                pass
         except Exception:
             pass
         self._reader.join(timeout=2)
