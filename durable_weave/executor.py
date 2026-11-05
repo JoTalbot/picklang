@@ -290,6 +290,10 @@ class DurableExecutor:
                 return self._run_locked(execution_id, workflow, input_, workflow_version)
         except ExecutionBusy as busy:
             return ExecutionResult(execution_id, "BUSY", error=str(busy))
+        except json.JSONDecodeError as exc:
+            # Persisted event payloads are untrusted storage data. A malformed JSON
+            # row must fail closed rather than escape the executor API.
+            return ExecutionResult(execution_id, "FAILED", error=f"corrupt journal: invalid JSON: {exc}")
         except (sqlite3.Error, OSError) as exc:
             # Не пытаемся записать сообщение об ошибке в уже сломанное хранилище.
             return ExecutionResult(execution_id, "FAILED", error=f"storage failure: {exc}")
@@ -348,7 +352,14 @@ class DurableExecutor:
                     "chain_ok": False, "chain_detail": "execution not found",
                     "artifacts_ok": False, "bad_artifacts": [],
                     "events": 0, "digest": "", "cas": self.cas.stats(), "verified": False}
-        self._load(execution_id)
+        try:
+            self._load(execution_id)
+        except json.JSONDecodeError as exc:
+            return {"execution_id": execution_id, "status": "CORRUPT",
+                    "chain_ok": False, "chain_detail": f"invalid JSON: {exc}",
+                    "artifacts_ok": False, "bad_artifacts": [],
+                    "events": 0, "digest": "", "cas": self.cas.stats(),
+                    "verified": False}
         assert self.log is not None
         ok, detail = self.log.verify_chain()
         # После compact результаты остаются в archive и/или snapshot.completed.
