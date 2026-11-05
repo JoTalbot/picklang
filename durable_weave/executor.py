@@ -424,6 +424,12 @@ class DurableExecutor:
                     "artifacts_ok": False, "bad_artifacts": [],
                     "events": 0, "digest": "", "cas": self.cas.stats(),
                     "verified": False}
+        except (sqlite3.Error, OSError) as exc:
+            return {"execution_id": execution_id, "status": "CORRUPT",
+                    "chain_ok": False, "chain_detail": f"invalid SQLite journal: {exc}",
+                    "artifacts_ok": False, "bad_artifacts": [],
+                    "events": 0, "digest": "", "cas": self.cas.stats(),
+                    "verified": False}
         assert self.log is not None
         try:
             ok, detail = self.log.verify_chain()
@@ -436,6 +442,12 @@ class DurableExecutor:
         except json.JSONDecodeError as exc:
             return {"execution_id": execution_id, "status": "CORRUPT",
                     "chain_ok": False, "chain_detail": f"invalid JSON: {exc}",
+                    "artifacts_ok": False, "bad_artifacts": [],
+                    "events": 0, "digest": "", "cas": self.cas.stats(),
+                    "verified": False}
+        except (sqlite3.Error, OSError) as exc:
+            return {"execution_id": execution_id, "status": "CORRUPT",
+                    "chain_ok": False, "chain_detail": f"invalid SQLite journal: {exc}",
                     "artifacts_ok": False, "bad_artifacts": [],
                     "events": 0, "digest": "", "cas": self.cas.stats(),
                     "verified": False}
@@ -463,6 +475,12 @@ class DurableExecutor:
         except JournalCorruptionError as exc:
             return {"execution_id": execution_id, "status": "CORRUPT",
                     "chain_ok": False, "chain_detail": str(exc),
+                    "artifacts_ok": False, "bad_artifacts": [],
+                    "events": 0, "digest": "", "cas": self.cas.stats(),
+                    "verified": False}
+        except (sqlite3.Error, OSError) as exc:
+            return {"execution_id": execution_id, "status": "CORRUPT",
+                    "chain_ok": False, "chain_detail": f"invalid SQLite journal: {exc}",
                     "artifacts_ok": False, "bad_artifacts": [],
                     "events": 0, "digest": "", "cas": self.cas.stats(),
                     "verified": False}
