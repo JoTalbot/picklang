@@ -75,6 +75,20 @@ def test_corrupt_journal_stops_before_handler(tmp_path):
     assert calls == [1]
 
 
+def test_malformed_archived_event_json_fails_closed_in_verify(tmp_path):
+    def workflow(ctx, inp):
+        return ctx.execute_activity('f')
+    ex = DurableExecutor(tmp_path, {'f': lambda p: 42}, snapshot_every=1)
+    assert ex.run('e', workflow, {}).status == 'COMPLETED'
+    ex.log.compact()
+    with ex.log.db:
+        ex.log.db.execute("UPDATE archive SET data='{' WHERE seq=0")
+    result = ex.verify('e')
+    assert result['status'] == 'CORRUPT'
+    assert result['verified'] is False
+    assert 'invalid JSON' in result['chain_detail']
+
+
 def test_corrupt_result_is_not_replayed(tmp_path):
     calls = []
     def workflow(ctx, inp):
