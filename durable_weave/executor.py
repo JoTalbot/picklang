@@ -56,10 +56,14 @@ def _validate_executor_event(event: dict[str, Any]) -> None:
     """Validate fields consumed by replay; generic journal event types stay extensible."""
     typ = event["type"]
     data = event["data"]
+    # Keep storage validation compatible with historical event payloads.
+    # Legacy parallel ActivityCompleted rows omit "activity"; replay detects
+    # their old step IDs and reports the explicit-migration requirement.
+    # Pre-v1 snapshots omit "steps" and remain recoverable from the journal.
     required: dict[str, tuple[str, ...]] = {
-        "ActivityCompleted": ("step", "activity", "result_ref"),
+        "ActivityCompleted": ("step", "result_ref"),
         "SignalReceived": ("name", "payload"),
-        "StateSnapshot": ("snapshot_ref", "steps"),
+        "StateSnapshot": ("snapshot_ref",),
         "WorkflowCompleted": ("output_ref",),
     }
     fields = required.get(typ)
@@ -83,7 +87,7 @@ def _validate_executor_event(event: dict[str, Any]) -> None:
                 raise JournalCorruptionError(
                     f"event {event['seq']}: invalid {typ} schema: {field} must be a SHA-256 digest"
                 )
-    if typ == "StateSnapshot" and (
+    if typ == "StateSnapshot" and "steps" in data and (
         isinstance(data["steps"], bool) or not isinstance(data["steps"], int) or data["steps"] < 0
     ):
         raise JournalCorruptionError(
