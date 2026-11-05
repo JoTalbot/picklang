@@ -52,6 +52,45 @@ def _input_digest(payload: dict) -> str:
     """Хэш входа прямо в событии: отдельный CAS-объект ради digest больше не пишется."""
     return sha256_hex(canonical_json(payload))
 
+def _validate_executor_event(event: dict[str, Any]) -> None:
+    """Validate fields consumed by replay; generic journal event types stay extensible."""
+    typ = event["type"]
+    data = event["data"]
+    required: dict[str, tuple[str, ...]] = {
+        "ActivityCompleted": ("step", "activity", "result_ref"),
+        "SignalReceived": ("name", "payload"),
+        "StateSnapshot": ("snapshot_ref", "steps"),
+        "WorkflowCompleted": ("output_ref",),
+    }
+    fields = required.get(typ)
+    if fields is None:
+        return
+    missing = [field for field in fields if field not in data]
+    if missing:
+        raise JournalCorruptionError(
+            f"event {event['seq']}: invalid {typ} schema: missing {', '.join(missing)}"
+        )
+    for field in ("step", "activity", "name"):
+        if field in data and (not isinstance(data[field], str) or not data[field]):
+            raise JournalCorruptionError(
+                f"event {event['seq']}: invalid {typ} schema: {field} must be non-empty text"
+            )
+    for field in ("result_ref", "snapshot_ref", "output_ref"):
+        if field in data:
+            value = data[field]
+            if (not isinstance(value, str) or len(value) != 64
+                    or any(ch not in "0123456789abcdef" for ch in value)):
+                raise JournalCorruptionError(
+                    f"event {event['seq']}: invalid {typ} schema: {field} must be a SHA-256 digest"
+                )
+    if typ == "StateSnapshot" and (
+        isinstance(data["steps"], bool) or not isinstance(data["steps"], int) or data["steps"] < 0
+    ):
+        raise JournalCorruptionError(
+            f"event {event['seq']}: invalid StateSnapshot schema: steps must be a non-negative integer"
+        )
+
+
 
 class Context:
     """Контекст workflow: единственный легальный способ делать сайд-эффекты и ждать сигналов."""
@@ -237,6 +276,8 @@ class DurableExecutor:
         self.snapshot_used = False
         self._seq_counter = 0
         events = self.log.events
+        for event in events:
+            _validate_executor_event(event)
         start = 0
         # П.1: последний снимок даёт completed-карту сразу; обрабатываем только хвост после него
         for i in range(len(events) - 1, -1, -1):
