@@ -372,7 +372,6 @@ class DurableExecutor:
                     "verified": False}
         # После compact результаты остаются в archive и/или snapshot.completed.
         # Проверяем все семантические ссылки, а не только output активного окна.
-        import json
         refs: set[str] = set()
         snapshots: set[str] = set()
         tables = ["events"]
