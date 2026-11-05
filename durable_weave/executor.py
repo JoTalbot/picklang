@@ -22,7 +22,7 @@ from typing import Any, Callable
 
 from .cas import ContentAddressedStore, canonical_json, sha256_hex
 from .locking import ExecutionBusy, execution_lock
-from .sqlite_backend import SQLiteEventLog
+from .sqlite_backend import JournalCorruptionError, SQLiteEventLog, decode_event
 
 
 class SimulatedCrash(Exception):
@@ -291,9 +291,10 @@ class DurableExecutor:
                 return self._run_locked(execution_id, workflow, input_, workflow_version)
         except ExecutionBusy as busy:
             return ExecutionResult(execution_id, "BUSY", error=str(busy))
+        except JournalCorruptionError as exc:
+            # Persisted rows are untrusted: invalid JSON and invalid event schemas fail closed.
+            return ExecutionResult(execution_id, "FAILED", error=f"corrupt journal: {exc}")
         except json.JSONDecodeError as exc:
-            # Persisted event payloads are untrusted storage data. A malformed JSON
-            # row must fail closed rather than escape the executor API.
             return ExecutionResult(execution_id, "FAILED", error=f"corrupt journal: invalid JSON: {exc}")
         except (sqlite3.Error, OSError) as exc:
             # Не пытаемся записать сообщение об ошибке в уже сломанное хранилище.
@@ -355,6 +356,12 @@ class DurableExecutor:
                     "events": 0, "digest": "", "cas": self.cas.stats(), "verified": False}
         try:
             self._load(execution_id)
+        except JournalCorruptionError as exc:
+            return {"execution_id": execution_id, "status": "CORRUPT",
+                    "chain_ok": False, "chain_detail": str(exc),
+                    "artifacts_ok": False, "bad_artifacts": [],
+                    "events": 0, "digest": "", "cas": self.cas.stats(),
+                    "verified": False}
         except json.JSONDecodeError as exc:
             return {"execution_id": execution_id, "status": "CORRUPT",
                     "chain_ok": False, "chain_detail": f"invalid JSON: {exc}",
@@ -379,21 +386,23 @@ class DurableExecutor:
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='archive'"
         ).fetchone():
             tables.append("archive")
-        for table in tables:
-            for (raw,) in self.log.db.execute(f"SELECT data FROM {table}"):
-                try:
-                    data = json.loads(raw)
-                except json.JSONDecodeError as exc:
-                    return {"execution_id": execution_id, "status": "CORRUPT",
-                            "chain_ok": False, "chain_detail": f"invalid JSON: {exc}",
-                            "artifacts_ok": False, "bad_artifacts": [],
-                            "events": 0, "digest": "", "cas": self.cas.stats(),
-                            "verified": False}
-                for key in ("input_ref", "result_ref", "output_ref", "snapshot_ref"):
-                    if data.get(key):
-                        refs.add(data[key])
-                if data.get("snapshot_ref"):
-                    snapshots.add(data["snapshot_ref"])
+        try:
+            for table in tables:
+                for seq, typ, raw, prev, digest in self.log.db.execute(
+                        f"SELECT seq,type,data,prev,hash FROM {table}"):
+                    event = decode_event(seq, typ, raw, prev, digest)
+                    data = event["data"]
+                    for key in ("input_ref", "result_ref", "output_ref", "snapshot_ref"):
+                        if data.get(key):
+                            refs.add(data[key])
+                    if data.get("snapshot_ref"):
+                        snapshots.add(data["snapshot_ref"])
+        except JournalCorruptionError as exc:
+            return {"execution_id": execution_id, "status": "CORRUPT",
+                    "chain_ok": False, "chain_detail": str(exc),
+                    "artifacts_ok": False, "bad_artifacts": [],
+                    "events": 0, "digest": "", "cas": self.cas.stats(),
+                    "verified": False}
         invalid_snapshots = set()
         for ref in sorted(snapshots):
             try:
