@@ -286,3 +286,23 @@ def test_missing_replay_fields_in_archive_fail_closed(tmp_path):
     assert verification["verified"] is False
     assert "invalid ActivityCompleted schema" in verification["chain_detail"]
     assert calls == [1]
+
+
+def test_corrupt_sqlite_database_fails_closed_in_run_and_verify(tmp_path):
+    def workflow(ctx, inp):
+        return ctx.execute_activity("f")
+
+    ex = DurableExecutor(tmp_path, {"f": lambda p: 42})
+    assert ex.run("e", workflow, {}).status == "COMPLETED"
+    db_path = tmp_path / "executions" / "e" / "events.db"
+    ex.log.db.close()
+    db_path.write_bytes(b"not a sqlite database")
+
+    result = DurableExecutor(tmp_path, {"f": lambda p: 99}).run("e", workflow, {})
+    assert result.status == "FAILED"
+    assert "storage failure" in result.error
+
+    verification = DurableExecutor(tmp_path, {}).verify("e")
+    assert verification["status"] == "CORRUPT"
+    assert verification["verified"] is False
+    assert "invalid SQLite journal" in verification["chain_detail"]
