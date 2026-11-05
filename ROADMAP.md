@@ -206,7 +206,7 @@
 - **#71 — AOT nested fields parity:** fusion использует каноническую рекурсивную семантику `fields()`; CI прошёл.
 - **#72 — SQLite journal fail-closed:** malformed JSON, не-объектные payloads, неверные replay-схемы, повреждённая SQLite БД и нечитаемые CAS-объекты приводят к структурированному отказу проверки/исполнения; CI на актуальном head aebe5c3 прошёл на Python 3.11/3.12/3.13 и Temporal integration.
 - **#73 — CAS directory durability:** после записи файла и атомарного rename синхронизируются родительские каталоги на POSIX, включая создание shard-директорий. Обновлён контракт надёжности: SQLite `WAL + synchronous=NORMAL` по-прежнему не даёт гарантии сохранности всего исполнения при потере питания. CI прошёл.
-- **#74 — formatter/parser string safety:** форматтер сохраняет содержимое строк, а parser теперь учитывает кавычки при разборе `>>`, `||` и `=`, включая escaped и triple-quoted literals. Последний CI run на head выполняется; предыдущий ошибочный тестовый fixture был исправлен.
+- **#74 — formatter/parser string safety:** форматтер сохраняет содержимое строк, а parser теперь учитывает кавычки при разборе `>>`, `||` и `=`, включая escaped и triple-quoted literals. CI на head `3017c31b` прошёл на Python 3.11/3.12/3.13 и Temporal integration.
 - Все перечисленные PR остаются открытыми и не слитыми. Текущий опубликованный релиз остаётся `v0.1.11`; новый тег или GitHub Release не создавался.
 
 ### Состояние этапов
