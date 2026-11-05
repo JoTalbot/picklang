@@ -74,6 +74,16 @@ def _validate_executor_event(event: dict[str, Any]) -> None:
         raise JournalCorruptionError(
             f"event {event['seq']}: invalid {typ} schema: missing {', '.join(missing)}"
         )
+    if typ == "ActivityCompleted" and "activity" not in data:
+        step = data.get("step", "")
+        legacy_parallel = (
+            isinstance(step, str) and step.startswith("par")
+            and "." not in step.split(":", 1)[0]
+        )
+        if not legacy_parallel:
+            raise JournalCorruptionError(
+                f"event {event['seq']}: invalid ActivityCompleted schema: missing activity"
+            )
     for field in ("step", "activity", "name"):
         if field in data and (not isinstance(data[field], str) or not data[field]):
             raise JournalCorruptionError(
