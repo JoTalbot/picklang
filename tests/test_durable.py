@@ -1,3 +1,5 @@
+import pytest
+
 from durable_weave import ContentAddressedStore, DurableExecutor
 from durable_weave.pickrun import run_pick
 
@@ -49,3 +51,25 @@ def test_pick_over_durable_executor_with_signal(tmp_path):
     r2, ex2 = run_pick(src, reg, {"q": "отчёт"}, tmp_path, "agent-1")
     assert r2.status == "COMPLETED" and calls == ["mail"]
     assert ex2.verify("agent-1")["verified"]
+
+
+def test_cas_rejects_path_traversal_references(tmp_path):
+    cas = ContentAddressedStore(tmp_path / "cas")
+    outside = tmp_path / "outside"
+    outside.write_text("must not be read", encoding="utf-8")
+
+    # Before validation, this value would resolve from objects/ to tmp_path/outside.
+    with pytest.raises(ValueError, match="invalid CAS reference"):
+        cas.get_bytes("../../outside")
+    assert outside.read_text(encoding="utf-8") == "must not be read"
+    assert cas.has("../../outside") is False
+    assert cas.verify("../../outside") is False
+
+
+@pytest.mark.parametrize("ref", ["", "a" * 63, "a" * 65, "A" * 64, "g" * 64, None, 123])
+def test_cas_rejects_malformed_references(tmp_path, ref):
+    cas = ContentAddressedStore(tmp_path / "cas")
+    with pytest.raises(ValueError, match="invalid CAS reference"):
+        cas._path(ref)
+    assert cas.has(ref) is False
+    assert cas.verify(ref) is False
