@@ -24,6 +24,18 @@ def canonical_json(obj: Any) -> bytes:
     return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
+def _fsync_directory(path: Path) -> None:
+    """Persist directory-entry changes after atomic rename on POSIX filesystems."""
+    if os.name != "posix":
+        return
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    fd = os.open(path, flags)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 class ContentAddressedStore:
     def __init__(self, root: str | Path):
         self.root = Path(root)
@@ -46,6 +58,8 @@ class ContentAddressedStore:
                     stream.flush()
                     os.fsync(stream.fileno())
                 os.replace(tmp, path)  # уникальный файл для каждого писателя
+                # fsync(file) persists contents; fsync(parent) persists the rename itself.
+                _fsync_directory(path.parent)
             finally:
                 tmp.unlink(missing_ok=True)
         return ref
