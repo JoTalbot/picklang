@@ -362,7 +362,14 @@ class DurableExecutor:
                     "events": 0, "digest": "", "cas": self.cas.stats(),
                     "verified": False}
         assert self.log is not None
-        ok, detail = self.log.verify_chain()
+        try:
+            ok, detail = self.log.verify_chain()
+        except json.JSONDecodeError as exc:
+            return {"execution_id": execution_id, "status": "CORRUPT",
+                    "chain_ok": False, "chain_detail": f"invalid JSON: {exc}",
+                    "artifacts_ok": False, "bad_artifacts": [],
+                    "events": 0, "digest": "", "cas": self.cas.stats(),
+                    "verified": False}
         # После compact результаты остаются в archive и/или snapshot.completed.
         # Проверяем все семантические ссылки, а не только output активного окна.
         import json
@@ -375,7 +382,14 @@ class DurableExecutor:
             tables.append("archive")
         for table in tables:
             for (raw,) in self.log.db.execute(f"SELECT data FROM {table}"):
-                data = json.loads(raw)
+                try:
+                    data = json.loads(raw)
+                except json.JSONDecodeError as exc:
+                    return {"execution_id": execution_id, "status": "CORRUPT",
+                            "chain_ok": False, "chain_detail": f"invalid JSON: {exc}",
+                            "artifacts_ok": False, "bad_artifacts": [],
+                            "events": 0, "digest": "", "cas": self.cas.stats(),
+                            "verified": False}
                 for key in ("input_ref", "result_ref", "output_ref", "snapshot_ref"):
                     if data.get(key):
                         refs.add(data[key])
