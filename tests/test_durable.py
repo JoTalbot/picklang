@@ -1,6 +1,7 @@
 from durable_weave import ContentAddressedStore, DurableExecutor
 from durable_weave.pickrun import run_pick
 
+
 PAYMENT = open("examples/payment.pick", encoding="utf-8").read()
 
 
@@ -11,6 +12,46 @@ def test_cas_dedup_and_tamper(tmp_path):
     assert cas.verify(a)
     cas._path(a).write_bytes("подменено".encode())
     assert not cas.verify(a)
+
+
+def test_cas_fsyncs_object_directory_after_atomic_rename(tmp_path, monkeypatch):
+    import durable_weave.cas as cas_module
+
+    events = []
+    real_replace = cas_module.os.replace
+
+    def tracked_replace(source, destination):
+        events.append("replace")
+        real_replace(source, destination)
+
+    def tracked_directory_fsync(path):
+        events.append(("directory_fsync", path))
+
+    monkeypatch.setattr(cas_module.os, "replace", tracked_replace)
+    monkeypatch.setattr(cas_module, "_fsync_directory", tracked_directory_fsync)
+
+    cas = ContentAddressedStore(tmp_path / "cas")
+    events.clear()
+    real_mkdir = cas_module.Path.mkdir
+
+    def tracked_mkdir(path, *args, **kwargs):
+        was_missing = not path.exists()
+        result = real_mkdir(path, *args, **kwargs)
+        if was_missing:
+            events.append(("mkdir", path))
+        return result
+
+    monkeypatch.setattr(cas_module.Path, "mkdir", tracked_mkdir)
+    ref = cas.put_bytes(b"durable object")
+
+    shard = cas._path(ref).parent
+    assert cas.verify(ref)
+    assert events == [
+        ("mkdir", shard),
+        ("directory_fsync", cas.objects),
+        "replace",
+        ("directory_fsync", shard),
+    ]
 
 
 def test_executor_replay_does_not_repeat_completed_activity(tmp_path):
