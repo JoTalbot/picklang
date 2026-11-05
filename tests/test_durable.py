@@ -31,10 +31,27 @@ def test_cas_fsyncs_object_directory_after_atomic_rename(tmp_path, monkeypatch):
     monkeypatch.setattr(cas_module, "_fsync_directory", tracked_directory_fsync)
 
     cas = ContentAddressedStore(tmp_path / "cas")
+    events.clear()
+    real_mkdir = cas_module.Path.mkdir
+
+    def tracked_mkdir(path, *args, **kwargs):
+        was_missing = not path.exists()
+        result = real_mkdir(path, *args, **kwargs)
+        if was_missing:
+            events.append(("mkdir", path))
+        return result
+
+    monkeypatch.setattr(cas_module.Path, "mkdir", tracked_mkdir)
     ref = cas.put_bytes(b"durable object")
 
+    shard = cas._path(ref).parent
     assert cas.verify(ref)
-    assert events == ["replace", ("directory_fsync", cas._path(ref).parent)]
+    assert events == [
+        ("mkdir", shard),
+        ("directory_fsync", cas.objects),
+        "replace",
+        ("directory_fsync", shard),
+    ]
 
 
 def test_executor_replay_does_not_repeat_completed_activity(tmp_path):
