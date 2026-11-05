@@ -25,7 +25,7 @@ def canonical_json(obj: Any) -> bytes:
 
 
 def _fsync_directory(path: Path) -> None:
-    """Persist directory-entry changes after atomic rename on POSIX filesystems."""
+    """Persist directory-entry changes on POSIX filesystems."""
     if os.name != "posix":
         return
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
@@ -36,11 +36,26 @@ def _fsync_directory(path: Path) -> None:
         os.close(fd)
 
 
+def _mkdir_durable(path: Path) -> None:
+    """Create missing directories and persist each new entry in its parent."""
+    missing = []
+    current = path
+    while not current.exists():
+        missing.append(current)
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    for directory in reversed(missing):
+        directory.mkdir(exist_ok=True)
+        _fsync_directory(directory.parent)
+
+
 class ContentAddressedStore:
     def __init__(self, root: str | Path):
         self.root = Path(root)
         self.objects = self.root / "objects"
-        self.objects.mkdir(parents=True, exist_ok=True)
+        _mkdir_durable(self.objects)
 
     def _path(self, ref: str) -> Path:
         return self.objects / ref[:2] / ref[2:]
@@ -49,7 +64,7 @@ class ContentAddressedStore:
         ref = sha256_hex(data)
         path = self._path(ref)
         if not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
+            _mkdir_durable(path.parent)
             fd, name = tempfile.mkstemp(dir=path.parent, prefix=".cas-", suffix=".tmp")
             tmp = Path(name)
             try:
