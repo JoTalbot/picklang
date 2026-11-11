@@ -338,7 +338,7 @@ def test_duplicate_signal_is_idempotent_across_snapshot_compaction_and_reopen(tm
         ctx.wait_signal("approval")
         return ctx.execute_activity("f")
 
-    handler = lambda payload: calls.append(payload) or 42
+    handler = lambda payload: calls.append(payload["_idempotency_key"]) or 42
     ex = DurableExecutor(tmp_path, {"f": handler}, snapshot_every=1)
     assert ex.run("e", workflow, {}).status == "WAITING"
 
@@ -354,4 +354,4 @@ def test_duplicate_signal_is_idempotent_across_snapshot_compaction_and_reopen(tm
     reopened.deliver_signal("e", "approval", {"approved": True})
     assert sum(event["type"] == "SignalReceived" for event in reopened.log.history()) == 1
     assert reopened.run("e", workflow, {}).output == 42
-    assert calls == [{"approved": True}]
+    assert calls == ["0:f:auto"]
