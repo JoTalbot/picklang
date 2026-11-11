@@ -326,7 +326,7 @@ jobs:
           PY
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Enforce paired benchmark quality and token-efficiency gate
+      - name: Enforce paired benchmark quality and telemetry-integrity gate
         if: always()
         shell: bash
         run: python bench_gate.py bench/live_paired_ab.json
