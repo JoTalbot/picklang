@@ -114,3 +114,57 @@ def test_cas_rejects_malformed_references(tmp_path, ref):
         cas._path(ref)
     assert cas.has(ref) is False
     assert cas.verify(ref) is False
+
+
+def test_cas_recovery_removes_only_old_temporary_files(tmp_path):
+    import os
+    import time
+
+    cas = ContentAddressedStore(tmp_path / "cas")
+    ref = cas.put_text("committed object")
+    shard = cas._path(ref).parent
+    stale = shard / ".cas-abandoned.tmp"
+    fresh = shard / ".cas-active.tmp"
+    unrelated = shard / "notes.tmp"
+    stale.write_bytes(b"orphan")
+    fresh.write_bytes(b"active writer")
+    unrelated.write_bytes(b"keep")
+    old = time.time() - 600
+    os.utime(stale, (old, old))
+
+    result = cas.recover_temporary_files(min_age=300)
+
+    assert result == {"removed_temporary_files": 1, "removed_bytes": 6}
+    assert not stale.exists()
+    assert fresh.read_bytes() == b"active writer"
+    assert unrelated.read_bytes() == b"keep"
+    assert cas.get_bytes(ref) == b"committed object"
+    assert cas.verify(ref)
+
+
+def test_cas_recovery_does_not_follow_or_remove_symlinks(tmp_path):
+    import os
+
+    cas = ContentAddressedStore(tmp_path / "cas")
+    shard = cas.objects / "aa"
+    shard.mkdir()
+    target = tmp_path / "outside.tmp"
+    target.write_text("keep", encoding="utf-8")
+    link = shard / ".cas-link.tmp"
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are unavailable")
+
+    result = cas.recover_temporary_files(min_age=0)
+    assert result == {"removed_temporary_files": 0, "removed_bytes": 0}
+    assert link.is_symlink()
+    assert target.read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.parametrize("age", [-1, float("nan"), float("inf"), True, "300"])
+def test_cas_recovery_rejects_invalid_age(tmp_path, age):
+    cas = ContentAddressedStore(tmp_path / "cas")
+    with pytest.raises(ValueError, match="finite non-negative number"):
+        cas.recover_temporary_files(min_age=age)
+
