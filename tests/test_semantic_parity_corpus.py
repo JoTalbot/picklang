@@ -33,9 +33,14 @@ def _run_both(source, registry_factory, inputs, *, compare_calls=True):
         else:
             observed.append(("ok", output, calls))
 
-    left = observed[0] if compare_calls else observed[0][:-1]
-    right = observed[1] if compare_calls else observed[1][:-1]
-    assert left == right, (source, observed)
+    if compare_calls:
+        assert observed[0] == observed[1], (source, observed)
+    elif observed[0][0] == observed[1][0] == "ok":
+        # The third run_program tuple item is an internal dispatch trace;
+        # stdlib built-ins are lowered differently by AOT, not host side effects.
+        assert observed[0][1][:2] == observed[1][1][:2], (source, observed)
+    else:
+        assert observed[0][1:3] == observed[1][1:3], (source, observed)
     return observed[0]
 
 
