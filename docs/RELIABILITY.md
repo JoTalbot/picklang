@@ -124,7 +124,7 @@ INSERT/commit не меняет ни events в памяти, ни completed-ка
 - batch-вариант не используется, если у тела цикла заданы retries, effect или compensation;
 - capability allowlist проверяется по исходной функции до выбора batch-варианта;
 - tainted state отключает batch shortcut, чтобы каждый потенциально опасный вызов прошёл обычную проверку аргументов;
-- локальный batch-вызов учитывается в token/step budget, а secret references разрешаются до передачи host-функции;
+- локальный batch-вызов учитывается в token/step budget, а secret references в элементах коллекции и дополнительных аргументах разрешаются до передачи host-функции, при этом исходная loop variable остаётся нераскрытой;
 - результаты недоверенных batch-функций получают тот же wrapper/taint, что и обычный вызов;
 - для vectorized batch loop пустая коллекция сохраняет установленный AOT-контракт: batch получает пустой список, target становится пустым списком, loop variable — `None`.
 
