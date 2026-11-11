@@ -123,3 +123,151 @@ def test_agent_tool_benchmark_reports_precise_fixture_metrics():
         metrics["raw_tokens"] / metrics["projected_tokens"]
     )
     assert 0 < metrics["saved_percent"] < 100
+
+def test_batch_loop_cannot_bypass_capability_allowlist():
+    calls = []
+    registry = {
+        "ship": lambda item: calls.append(("single", item)) or item,
+        "ship.batch": lambda items: calls.append(("batch", list(items))) or items,
+    }
+    with pytest.raises(Exception, match="capability"):
+        run_program(
+            "> t(xs)\\nfor i in xs: y = ship(i)\\nout y\\n",
+            registry,
+            {"xs": [1, 2]},
+            capabilities={"other"},
+            prefer_aot=False,
+        )
+    assert calls == []
+
+
+def test_batch_loop_preserves_untrusted_taint_at_sinks():
+    calls = []
+    registry = {
+        "web.read": lambda item: item,
+        "web.read.batch": lambda items: calls.append("batch") or list(items),
+        "bank.charge": lambda payload, amount: calls.append("charge") or {"ok": True},
+    }
+    source = (
+        "> t(xs)\\n"
+        "for i in xs: page = web.read(i)\\n"
+        "charge = bank.charge(page.data, 1)\\n"
+        "out charge\\n"
+    )
+    from picklang.interpreter import PickRuntimeError
+    with pytest.raises(PickRuntimeError, match="taint"):
+        run_program(source, registry, {"xs": ["u1", "u2"]},
+                    untrusted={"web.read"}, prefer_aot=False)
+    assert calls == ["batch"]
+
+
+def test_batch_loop_charges_result_token_budget():
+    calls = []
+    registry = {
+        "ship": lambda item: item,
+        "ship.batch": lambda items: calls.append("batch") or [item * 10 for item in items],
+    }
+    source = (
+        "> t(xs)\\n"
+        "!budget tokens<1\\n"
+        "for i in xs: y = ship(i)\\n"
+        "out y\\n"
+    )
+    with pytest.raises(BudgetExceeded):
+        run_program(source, registry, {"xs": [1, 2, 3]}, prefer_aot=False)
+    assert calls == ["batch"]
+
+
+def test_empty_batch_loop_matches_zero_iteration_semantics():
+    calls = []
+    registry = {
+        "ship": lambda item: item,
+        "ship.batch": lambda items: calls.append("batch") or list(items),
+    }
+    with pytest.raises(Exception, match="не определена"):
+        run_program(
+            "> t(xs)\\nfor i in xs: y = ship(i)\\nout y\\n",
+            registry,
+            {"xs": []},
+            prefer_aot=False,
+        )
+    assert calls == []
+
+
+def test_batch_loop_does_not_skip_saga_compensations():
+    calls = []
+    registry = {
+        "ship": lambda item: calls.append(("ship", item)) or item,
+        "ship.batch": lambda items: calls.append(("batch", list(items))) or list(items),
+        "release": lambda item: calls.append(("release", item)),
+    }
+    source = (
+        "> t(xs)\\n"
+        "for i in xs: y = ship(i) ! release(i)\\n"
+        "? false -> fail \\"force rollback\\"\\n"
+        "out y\\n"
+    )
+    from picklang.interpreter import PickRuntimeError
+    with pytest.raises(PickRuntimeError, match="guard failed"):
+        run_program(source, registry, {"xs": [1, 2]}, prefer_aot=False)
+    assert calls == [
+        ("ship", 1), ("ship", 2), ("release", 2), ("release", 1)
+    ]
+
+
+def test_parallel_untrusted_result_remains_tainted():
+    calls = []
+    registry = {
+        "web.read": lambda url: "untrusted content",
+        "other": lambda: "safe",
+        "bank.charge": lambda payload, amount: calls.append("charge") or {"ok": True},
+    }
+    source = (
+        "> t(url)\\n"
+        "page = web.read(url) || safe = other()\\n"
+        "charge = bank.charge(page.data, 1)\\n"
+        "out charge\\n"
+    )
+    from picklang.interpreter import PickRuntimeError
+    with pytest.raises(PickRuntimeError, match="taint"):
+        run_program(source, registry, {"url": "u"},
+                    untrusted={"web.read"}, prefer_aot=False)
+    assert calls == []
+
+
+@pytest.mark.parametrize("approval", [1, "true", "approved"])
+def test_truthy_non_boolean_approval_does_not_release_untrusted_sink(approval):
+    calls = []
+    registry = {
+        "web.read": lambda url: "untrusted content",
+        "bank.charge": lambda payload, amount: calls.append("charge") or {"ok": True},
+    }
+    source = (
+        "> t(url)\\n"
+        "page = web.read(url)\\n"
+        "charge = bank.charge(page.data, 1)\\n"
+        "out charge\\n"
+    )
+    from picklang.interpreter import PickRuntimeError
+    with pytest.raises(PickRuntimeError, match="taint"):
+        run_program(source, registry, {"url": "u", "approval": approval},
+                    untrusted={"web.read"}, prefer_aot=False)
+    assert calls == []
+
+
+def test_boolean_true_approval_releases_untrusted_sink():
+    calls = []
+    registry = {
+        "web.read": lambda url: "untrusted content",
+        "bank.charge": lambda payload, amount: calls.append("charge") or {"ok": True},
+    }
+    source = (
+        "> t(url)\\n"
+        "page = web.read(url)\\n"
+        "charge = bank.charge(page.data, 1)\\n"
+        "out charge\\n"
+    )
+    out, *_ = run_program(source, registry, {"url": "u", "approval": True},
+                          untrusted={"web.read"}, prefer_aot=False)
+    assert out == {"ok": True}
+    assert calls == ["charge"]
