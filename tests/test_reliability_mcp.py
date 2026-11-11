@@ -209,3 +209,23 @@ for line in sys.stdin:
                     pytest.fail("MCP notifications reset the request deadline")
     finally:
         client.close()
+
+
+
+def test_mcp_client_rejects_expired_deadline_even_with_queued_notification():
+    import json
+    import queue
+
+    from picklang.mcp import McpClient, McpError
+
+    client = object.__new__(McpClient)
+    client.name = "expired"
+    client.timeout = 1.0
+    client._lines = queue.Queue()
+    client._lines.put(json.dumps({
+        "jsonrpc": "2.0",
+        "method": "notifications/progress",
+        "params": {"message": "queued before read"},
+    }))
+    with pytest.raises(McpError, match="не ответил"):
+        client._read_response("tools/call", time.monotonic() - 1.0)
