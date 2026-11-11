@@ -189,15 +189,15 @@ def test_failure_after_side_effect_preserves_error_and_effect_prefix():
             "SKU-2",
         ),
         (
-            '> t(x)\nout x + 2\n',
+            '> t(x)\ny = add(x, 2)\nout y\n',
             {"x": 4},
-            lambda calls, record: {},
+            lambda calls, record: {"add": lambda x, n: x + n},
             6,
         ),
         (
-            '> t(x)\nout x * 2\n',
+            '> t(x)\ny = double(x)\nout y\n',
             {"x": 12},
-            lambda calls, record: {},
+            lambda calls, record: {"double": lambda x: x * 2},
             24,
         ),
         (
