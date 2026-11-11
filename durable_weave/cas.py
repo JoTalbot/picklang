@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,10 @@ class ContentAddressedStore:
         self.objects.mkdir(parents=True, exist_ok=True)
 
     def _path(self, ref: str) -> Path:
+        # CAS refs are content hashes, never caller-controlled filesystem paths.
+        # Validate before slicing so malformed refs cannot escape the objects root.
+        if not isinstance(ref, str) or re.fullmatch(r"[0-9a-f]{64}", ref) is None:
+            raise ValueError("invalid CAS reference: expected lowercase SHA-256 hex")
         return self.objects / ref[:2] / ref[2:]
 
     def put_bytes(self, data: bytes) -> str:
@@ -57,7 +62,10 @@ class ContentAddressedStore:
         return self.put_bytes(text.encode("utf-8"))
 
     def has(self, ref: str) -> bool:
-        return self._path(ref).exists()
+        try:
+            return self._path(ref).exists()
+        except ValueError:
+            return False
 
     def get_bytes(self, ref: str) -> bytes:
         path = self._path(ref)
@@ -72,7 +80,7 @@ class ContentAddressedStore:
         """Пересчитать хэш хранимых байтов и сравнить с адресом."""
         try:
             return sha256_hex(self.get_bytes(ref)) == ref
-        except KeyError:
+        except (KeyError, ValueError, OSError):
             return False
 
     def stats(self) -> dict[str, Any]:
