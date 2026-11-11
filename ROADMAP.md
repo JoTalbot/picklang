@@ -290,6 +290,6 @@
 - PR #88–#90 интегрированы в `main`: качество paired benchmark gate сделано независимым от эффективности; расширен offline Interpreter/AOT semantic parity corpus; добавлено безопасное восстановление abandoned CAS temporary files.
 - PR #91 интегрирован в `main`: SQLite WAL close/reopen проверяет сохранение подтверждённых event batches, hash chain и отсутствие частичных событий после abort. Это не моделирует физическую потерю питания.
 - HEAD после merge PR #91: `f87642fe83808e129112cd5ec511349ef26bb66f`.
-- PR #91 CI прошёл на PR head; после merge запущен отдельный push workflow `43048225515`. Его итог следует проверять отдельно, не подменяя PR CI статусом post-merge CI.
+- PR #91 CI прошёл на PR head; отдельный post-merge push workflow `43048225515` также завершился `success`.
 - Следующий инженерный фокус: durable fault-injection matrix (CAS/SQLite/replay/wait/resume/compensation), затем tool/security boundary и честный end-to-end benchmark. Live API, ручные тесты, workflow_dispatch и публикация следующего релиза остаются закрытыми без отдельного разрешения.
 - Классический подход обычно разносит orchestration, recovery, state и проверки по библиотекам/инфраструктуре; PICK стремится дать единый проверяемый IR и durable execution contract. Преимущество по стоимости и задержке не считать доказанным без повторяемого paired end-to-end benchmark.
