@@ -177,21 +177,20 @@ def test_batch_loop_charges_result_token_budget():
     assert calls == ["batch"]
 
 
-def test_empty_batch_loop_matches_zero_iteration_semantics():
+def test_empty_batch_loop_preserves_aot_vectorized_semantics():
     calls = []
     registry = {
         "ship": lambda item: item,
         "ship.batch": lambda items: calls.append("batch") or list(items),
     }
-    with pytest.raises(PickRuntimeError, match="не определена"):
-        run_program(
-            "> t(xs)\nfor i in xs: y = ship(i)\nout y\n",
-            registry,
-            {"xs": []},
-            prefer_aot=False,
-        )
-    assert calls == []
-
+    out, env, trace = run_program(
+        "> t(xs)\nfor i in xs: y = ship(i)\nout y\n",
+        registry,
+        {"xs": []},
+        prefer_aot=False,
+    )
+    assert out == [] and env["y"] == [] and env["i"] is None
+    assert calls == ["batch"] and trace == ["ship.batch"]
 
 def test_batch_loop_does_not_skip_saga_compensations():
     calls = []
