@@ -8,7 +8,7 @@ Patch candidate focused on trustworthy measurement, interpreter safety, durable 
 - Close optimized interpreter bypasses: batch loops now respect capabilities, taint, token budgets, secret resolution, durable activity hooks, retries, effects, and compensations; parallel assignments preserve taint.
 - Approval for tainted external actions requires the exact boolean `true`, not merely a truthy value.
 - Resolve secret references in both batched loop items and extra host-call arguments without replacing the original loop variable in the returned environment.
-- Serialize MCP stdio request/response exchanges and verify JSON-RPC response identity; interleaved notifications are ignored while awaiting the matching response.
+- Serialize MCP stdio request/response exchanges and verify JSON-RPC response identity; interleaved notifications are ignored while awaiting the matching response, under one absolute request deadline.
 
 Limitations: these notes make no universal end-to-end token/cost/latency claim; live results belong to the specific release workflow run. No external MCP/business integrations or production side effects were exercised. External exactly-once effects still require provider-side idempotency. SQLite `WAL + synchronous=NORMAL` is not a power-loss durability guarantee.
 
