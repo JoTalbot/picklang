@@ -1,4 +1,4 @@
-# picklang 0.1.12 (release candidate, not published)
+# picklang 0.1.12
 
 Patch candidate focused on trustworthy measurement, interpreter safety, durable recovery, and MCP transport correctness.
 
@@ -9,7 +9,7 @@ Patch candidate focused on trustworthy measurement, interpreter safety, durable 
 - Approval for tainted external actions requires the exact boolean `true`, not merely a truthy value.
 - Serialize MCP stdio request/response exchanges and verify JSON-RPC response identity; interleaved notifications are ignored while awaiting the matching response.
 
-Limitations: no new live A/B evaluation was run for this candidate. Full end-to-end token/cost/latency advantage remains unproven. No external MCP/business integrations or production side effects were exercised. External exactly-once effects still require provider-side idempotency. SQLite `WAL + synchronous=NORMAL` is not a power-loss durability guarantee.
+Limitations: these notes make no universal end-to-end token/cost/latency claim; live results belong to the specific release workflow run. No external MCP/business integrations or production side effects were exercised. External exactly-once effects still require provider-side idempotency. SQLite `WAL + synchronous=NORMAL` is not a power-loss durability guarantee.
 
 ---
 
