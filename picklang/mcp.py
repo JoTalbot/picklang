@@ -41,11 +41,13 @@ class McpClient:
         self._lines.put(None)  # EOF: сервер закрылся
 
     def _read_response(self, method: str, deadline: float | None) -> str:
-        remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+        remaining = None if deadline is None else deadline - time.monotonic()
+        limit = "без таймаута" if self.timeout is None else f"за {self.timeout:g} с"
+        if remaining is not None and remaining <= 0:
+            raise McpError(f"MCP-сервер {self.name} не ответил на {method} {limit}")
         try:
             line = self._lines.get() if remaining is None else self._lines.get(timeout=remaining)
         except queue.Empty as exc:
-            limit = "без таймаута" if self.timeout is None else f"за {self.timeout:g} с"
             raise McpError(
                 f"MCP-сервер {self.name} не ответил на {method} {limit}"
             ) from exc
