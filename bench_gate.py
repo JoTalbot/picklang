@@ -9,8 +9,9 @@ from pathlib import Path
 def evaluate_report(report):
     if not isinstance(report, dict):
         return False, "invalid report: expected a JSON object"
-    if report.get("schema_version") != 1:
-        return False, f"invalid report schema_version: expected 1, got {report.get('schema_version')!r}"
+    schema_version = report.get("schema_version")
+    if isinstance(schema_version, bool) or schema_version != 1:
+        return False, f"invalid report schema_version: expected 1, got {schema_version!r}"
     if report.get("status") == "INCONCLUSIVE_RATE_LIMIT" or report.get("rate_limit_detected"):
         return False, "INCONCLUSIVE: provider rate limit; refusing to publish without efficiency evidence"
     if report.get("status") != "COMPLETED":
