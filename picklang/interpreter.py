@@ -392,6 +392,8 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
                         and (body.retries or 0) == 0
                         and body.effect is None
                         and body.compensation is None
+                        and activity_hook is None
+                        and not state.tainted
                         and (state.capabilities is None or body.expr[1] in state.capabilities)
                     )
                     if batch_safe:
@@ -403,6 +405,8 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
                     name, batch_name, fn = batch_fn
                     trace.append(batch_name)
                     args = [_eval(a, env, registry, activity_hook, trace, state) for a in body.expr[2][1:]]
+                    if state.resolve_secrets and activity_hook is None:
+                        args = [_resolve_secrets(arg) for arg in args]
                     results = fn(items_list, *args)
                     results = state.charge_call(name, results)
                     if body.target:
