@@ -1,5 +1,5 @@
 import sys
-import time
+import threading
 
 import pytest
 
@@ -55,15 +55,18 @@ def test_mcp_search_pushdown():
 # П.5 параллельный frontier durable-исполнителя
 def test_durable_parallel_frontier(tmp_path):
     from durable_weave import DurableExecutor
-    def slow(payload):
-        time.sleep(0.15)
+    rendezvous = threading.Barrier(2)
+
+    def concurrent(payload):
+        # Both tasks must reach the barrier before either can finish.
+        rendezvous.wait(timeout=2)
         return payload["v"]
-    ex = DurableExecutor(tmp_path, {"a": slow, "b": slow})
+
+    ex = DurableExecutor(tmp_path, {"a": concurrent, "b": concurrent})
     def wf(ctx, inp):
         return ctx.execute_parallel([("a", {"v": 1}, "a"), ("b", {"v": 2}, "b")])
-    t0 = time.perf_counter()
     r = ex.run("p1", wf, {})
-    assert r.output == [1, 2] and time.perf_counter() - t0 < 0.29
+    assert r.output == [1, 2]
     assert ex.verify("p1")["verified"]
 
 
