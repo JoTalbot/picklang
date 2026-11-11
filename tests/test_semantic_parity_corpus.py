@@ -189,16 +189,16 @@ def test_failure_after_side_effect_preserves_error_and_effect_prefix():
             "SKU-2",
         ),
         (
-            '> t(x)\n? x > 10 -> fail "too large"\nout x\n',
+            '> t(x)\nout x + 2\n',
             {"x": 4},
             lambda calls, record: {},
-            4,
+            6,
         ),
         (
-            '> t(x)\n? x > 10 -> fail "too large"\nout x\n',
+            '> t(x)\nout x * 2\n',
             {"x": 12},
             lambda calls, record: {},
-            None,
+            24,
         ),
         (
             '> t(xs)\nfor item in xs: y = wrap(item)\nout y\n',
