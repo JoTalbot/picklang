@@ -1,6 +1,10 @@
 # picklang 0.1.12
 
-Patch candidate focused on trustworthy measurement, interpreter safety, durable recovery, and MCP transport correctness.
+Published 2026-11-11 from main commit `56ad8fce7e4e13bd0ef854cc58e9c3b29b3164f4`.
+
+Patch release focused on trustworthy measurement, interpreter safety, durable recovery, and MCP transport correctness.
+
+Live acceptance (Groq, `openai/gpt-oss-20b`, 6 tasks × 3 repeats per adapter): PICK and classic Python each passed 18/18 invocations; exact structural outputs agreed 18/18. PICK reported 5,085 tokens versus Python's 6,420 (1,335 fewer, 20.8%); successful-invocation median was 0.51 s for PICK and 0.47 s for Python. This is one small paired sample, not a universal cost, quality, or latency guarantee.
 
 - Harden paired benchmark evidence: reject missing or malformed telemetry, invalid SHA-256 input digests, forged output-match flags, missing preserved outputs, and invalid pricing.
 - Expand offline Interpreter/AOT parity coverage for nested host fields, projections, loops, side-effect ordering, and failure surfaces.
