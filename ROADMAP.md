@@ -6,20 +6,16 @@
 
 ## Текущая точка
 
-- `v0.1.12` опубликован с исправлениями надёжности, безопасности и измерительной целостности. Тег и Release указывают на commit `56ad8fce7e4e13bd0ef854cc58e9c3b29b3164f4`.
-- `main` включает PR #75–#78, #81–#83 и #85–#87; актуальный интеграционный commit: `ef6cab9cc11210c2ed83a1fccc455d2a2ca3622d` (2026-11-11).
-- **#76:** парный A/B validator теперь отвергает неполную/поддельную телеметрию, malformed digest, несовпадающие outputs и некорректные тарифы.
-- **#77:** расширен offline Interpreter/AOT corpus: сравниваются результаты, окружение, порядок host calls и поверхности ошибок.
-- **#78 + #81:** покрыты replay сигналов после compaction, execution-lock/CAS commit-gap и восстановление саги компенсаций после частичного коммита. Старые конфликтующие ветки #79/#80 закрыты как superseded.
-- **#82:** batch-пути сохраняют budget/capability/taint/secret/compensation и durable activity-hook контракты; approval считается действительным только при точном boolean `true`; taint сохраняется при parallel assignment.
-- **#83:** MCP stdio запросы сериализованы, ответы проверяются по JSON-RPC version/request ID, уведомления без ID пропускаются.
-- **#85:** secret references разрешаются также внутри batch input collection; исходное значение последней loop variable не заменяется раскрытым секретом.
-- **#86:** MCP использует один абсолютный deadline на весь обмен; бесконечные progress notifications не продлевают запрос, а `timeout=0` означает немедленный timeout.
-- **#87:** истёкший deadline отклоняется до чтения уже накопившихся notifications, поэтому очередь сообщений не может продлить запрос.
-- Дублирующий PR #68 закрыт: его barrier-based изменения уже интегрированы в #74.
-- Для PR #76–#78, #81–#83 и #85–#87 автоматические PR CI прошли на Python 3.11/3.12/3.13 и Temporal integration. В PR CI live Groq и публикация релиза были пропущены по настройке.
-- Полный end-to-end A/B baseline по репрезентативной выборке по-прежнему **не подтверждён**: фактическая полная стоимость, распределения latency и повторяемость не установлены. Уменьшение исходных токенов само по себе не доказывает снижение стоимости полного агентного цикла.
-- Live Groq/OpenRouter/API, реальные MCP/складские/платёжные интеграции и внешние side effects не запускались. Публикация тега и GitHub Release не выполнялась.
+- Последний опубликованный релиз: `v0.1.12`, tag target `56ad8fce7e4e13bd0ef854cc58e9c3b29b3164f4`. Изменения после него относятся к следующему инженерному циклу и не меняют опубликованные wheel/sdist.
+- `main` включает PR #88–#92. После PR #91 durable SQLite WAL close/reopen tests проверяют сохранение подтверждённых event batches и hash chain, а также отсутствие частичных событий после abort; это не симуляция физического отключения питания.
+- **#88:** paired benchmark gate проверяет целостность набора, успешность и семантическое совпадение, но не требует заранее, чтобы PICK выиграл по токенам.
+- **#89:** offline Interpreter/AOT parity corpus расширен до 22 сценариев; PR CI прошёл на Python 3.11/3.12/3.13, package build/smoke и Temporal integration.
+- **#90:** безопасное восстановление старых abandoned CAS temporary files; PR CI прошёл на Python 3.11/3.12/3.13, package build/smoke и Temporal integration.
+- **#91:** добавлены SQLite WAL close/reopen tests; PR CI и post-merge workflow `43048225515` завершились `success`.
+- **#92:** исправлены release checklist и post-release roadmap; PR CI run `43048373250` завершился `success` на Python 3.11/3.12/3.13 и Temporal integration. Документационный PR объединён squash-коммитом `a9592e2742a8082af07ab955d67c94bcb106ccb0`.
+- Актуальный полный end-to-end A/B baseline на репрезентативной выборке **не подтверждён**. Релизный paired sample (6 задач × 3 повтора) показал PICK 5,085 tokens против Python 6,420, но медиана успешного вызова была 0.51 s против 0.47 s; это малый корпус, а не доказательство общего выигрыша по цене или скорости.
+- Live API и реальные внешние интеграции после публикации v0.1.12 не запускались. Платные live-проверки, ручные тесты, workflow dispatch и следующий release/tag остаются вне обычного батча без отдельного разрешения.
+- Следующий технический приоритет: единая fault-injection матрица CAS/SQLite/replay/wait/resume/compensation; затем границы tool/security и воспроизводимый end-to-end benchmark.
 
 ## Правила выполнения
 
