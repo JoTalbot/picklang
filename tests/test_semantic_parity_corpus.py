@@ -142,3 +142,157 @@ def test_failure_after_side_effect_preserves_error_and_effect_prefix():
     assert result[1] == "PickRuntimeError"
     assert "offline corpus failure" in result[2]
     assert result[3] == [("before-failure", 5), ("explode", 5)]
+
+
+@pytest.mark.parametrize(
+    ("source", "inputs", "registry_factory", "expected"),
+    [
+        (
+            '> t()\nout {"status": "ok", "items": [1, 2, 3]}\n',
+            {},
+            lambda calls, record: {},
+            {"status": "ok", "items": [1, 2, 3]},
+        ),
+        (
+            '> t(payload)\nout payload.meta.id\n',
+            {"payload": {"meta": {"id": "nested-9"}}},
+            lambda calls, record: {},
+            "nested-9",
+        ),
+        (
+            '> t(values)\nselected = top(values, 2)\nout selected\n',
+            {"values": [4, 5, 6]},
+            lambda calls, record: {"top": lambda values, n: list(values)[:n]},
+            [4, 5],
+        ),
+        (
+            '> t(x)\na = first(x)\nb = second(a)\nout b\n',
+            {"x": 7},
+            lambda calls, record: {
+                "first": lambda x: calls.append(("first", x)) or x + 1,
+                "second": lambda x: calls.append(("second", x)) or x * 3,
+            },
+            24,
+        ),
+        (
+            '> t(xs)\nfor item in xs: emit(item)\nout "done"\n',
+            {"xs": ["a", "b", "c"]},
+            lambda calls, record: {"emit": lambda item: calls.append(item)},
+            "done",
+        ),
+        (
+            '> t(x)\nvalue = lookup(x)\nout value.meta.code\n',
+            {"x": "sku-2"},
+            lambda calls, record: {
+                "lookup": lambda x: SimpleNamespace(meta=SimpleNamespace(code=x.upper()))
+            },
+            "SKU-2",
+        ),
+        (
+            '> t(x)\ny = add(x, 2)\nout y\n',
+            {"x": 4},
+            lambda calls, record: {"add": lambda x, n: x + n},
+            6,
+        ),
+        (
+            '> t(x)\ny = double(x)\nout y\n',
+            {"x": 12},
+            lambda calls, record: {"double": lambda x: x * 2},
+            24,
+        ),
+        (
+            '> t(xs)\nfor item in xs: y = wrap(item)\nout y\n',
+            {"xs": [2, 4]},
+            lambda calls, record: {"wrap": lambda item: {"value": item * 10}},
+            {"value": 40},
+        ),
+        (
+            '> t(x)\ny = absent(x)\nout y\n',
+            {"x": 1},
+            lambda calls, record: {},
+            None,
+        ),
+    ],
+)
+def test_representative_scalar_collection_and_failure_cases_match(
+    source, inputs, registry_factory, expected
+):
+    result = _run_both(source, registry_factory, inputs)
+    if expected is None:
+        assert result[0] == "error"
+        assert result[1] == "PickRuntimeError"
+    else:
+        assert result[0] == "ok"
+        assert result[1][0] == expected
+
+
+def test_host_exception_surface_matches_without_losing_call_prefix():
+    def registry(calls, record):
+        def fail(value):
+            calls.append(("fail", value))
+            raise LookupError("offline lookup unavailable")
+
+        return {"record": record, "fail": fail}
+
+    result = _run_both(
+        '> t(x)\na = record("started", x)\nb = fail(a)\nout b\n',
+        registry,
+        {"x": "part-8"},
+    )
+    assert result[0] == "error"
+    assert result[1] == "PickRuntimeError"
+    assert "offline lookup unavailable" in result[2]
+    assert result[3] == [("started", "part-8"), ("fail", "part-8")]
+
+
+def test_nested_collection_projection_keeps_shape_and_order():
+    rows = [
+        [{"id": "a", "secret": 1}, {"id": "b", "secret": 2}],
+        [{"id": "c", "secret": 3}],
+    ]
+    result = _run_both(
+        '> t(rows)\nselected = rows >> top(2) >> fields("id")\nout selected\n',
+        lambda calls, record: with_stdlib({}),
+        {"rows": rows},
+        compare_calls=False,
+    )
+    assert result[0] == "ok"
+    assert result[1][0] == [[{"id": "a"}, {"id": "b"}], [{"id": "c"}]]
+
+
+@pytest.mark.parametrize(
+    ("source", "inputs", "registry_factory", "expected"),
+    [
+        (
+            '> t()\nout "готово"\n',
+            {},
+            lambda calls, record: {},
+            "готово",
+        ),
+        (
+            '> t(record)\nout record.id\n',
+            {"record": {"id": "R-17", "private": True}},
+            lambda calls, record: {},
+            "R-17",
+        ),
+        (
+            '> t(xs)\nresult = take(xs, 1)\nout result\n',
+            {"xs": ["first", "second"]},
+            lambda calls, record: {"take": lambda xs, n: list(xs)[:n]},
+            ["first"],
+        ),
+        (
+            '> t(x)\na = normalize(x)\nb = decorate(a)\nout b\n',
+            {"x": "  part  "},
+            lambda calls, record: {
+                "normalize": lambda x: x.strip(),
+                "decorate": lambda x: {"label": x.upper()},
+            },
+            {"label": "PART"},
+        ),
+    ],
+)
+def test_additional_parity_edges_match(source, inputs, registry_factory, expected):
+    result = _run_both(source, registry_factory, inputs)
+    assert result[0] == "ok"
+    assert result[1][0] == expected
