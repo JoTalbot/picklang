@@ -329,3 +329,29 @@ def test_unreadable_cas_object_fails_closed_in_verify(tmp_path, monkeypatch):
     assert result["artifacts_ok"] is False
     assert result["bad_artifacts"] == [ref]
     assert result["verified"] is False
+
+
+def test_duplicate_signal_is_idempotent_across_snapshot_compaction_and_reopen(tmp_path):
+    calls = []
+
+    def workflow(ctx, inp):
+        ctx.wait_signal("approval")
+        return ctx.execute_activity("f")
+
+    handler = lambda payload: calls.append(payload) or 42
+    ex = DurableExecutor(tmp_path, {"f": handler}, snapshot_every=1)
+    assert ex.run("e", workflow, {}).status == "WAITING"
+
+    ex.deliver_signal("e", "approval", {"approved": True})
+    ex.deliver_signal("e", "approval", {"approved": True})
+    assert sum(event["type"] == "SignalReceived" for event in ex.log.history()) == 1
+
+    assert ex.run("e", workflow, {}).output == 42
+    assert ex.log.compact()["archived"] > 0
+
+    # Reopen from the compacted journal: the snapshot must retain signal identity.
+    reopened = DurableExecutor(tmp_path, {"f": handler}, snapshot_every=1)
+    reopened.deliver_signal("e", "approval", {"approved": True})
+    assert sum(event["type"] == "SignalReceived" for event in reopened.log.history()) == 1
+    assert reopened.run("e", workflow, {}).output == 42
+    assert calls == [{"approved": True}]
