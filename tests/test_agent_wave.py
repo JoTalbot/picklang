@@ -292,8 +292,6 @@ def test_truthy_non_boolean_wait_signal_does_not_approve_tainted_sink():
                     untrusted={"web.read"}, prefer_aot=False)
     assert calls == []
 
-
-
 def test_batch_loop_does_not_bypass_durable_activity_hook():
     calls = []
     registry = {
@@ -306,7 +304,7 @@ def test_batch_loop_does_not_bypass_durable_activity_hook():
         return fn(*args)
 
     out, *_ = run_program(
-        "> t(xs)\\nfor i in xs: y = ship(i)\\nout y\\n",
+        "> t(xs)\nfor i in xs: y = ship(i)\nout y\n",
         registry,
         {"xs": [1, 2]},
         activity_hook=hook,
@@ -324,7 +322,7 @@ def test_batch_loop_resolves_secrets_before_host_call(monkeypatch):
         "send.batch": lambda items, token: (seen.append((list(items), token)) or list(items)),
     }
     out, *_ = run_program(
-        '> t(xs)\\nfor i in xs: y = send(i, "secret:PICK_BATCH_SECRET")\\nout y\\n',
+        '> t(xs)\nfor i in xs: y = send(i, "secret:PICK_BATCH_SECRET")\nout y\n',
         registry,
         {"xs": [1, 2]},
         prefer_aot=False,
@@ -341,10 +339,10 @@ def test_tainted_input_cannot_reach_batched_sensitive_sink():
         "bank.charge.batch": lambda payloads: calls.append("batch") or [{"ok": True}],
     }
     source = (
-        "> t(xs)\\n"
-        "page = web.read("u")\\n"
-        "for i in xs: charge = bank.charge(page.data, i)\\n"
-        "out charge\\n"
+        "> t(xs)\n"
+        "page = web.read(\"u\")\n"
+        "for i in xs: charge = bank.charge(page.data, i)\n"
+        "out charge\n"
     )
     with pytest.raises(PickRuntimeError, match="taint"):
         run_program(source, registry, {"xs": [1, 2]},
