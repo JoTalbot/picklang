@@ -402,10 +402,12 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
                             batch_fn = (body.expr[1], body.expr[1] + ".batch", cand)
                 if batch_fn is not None:
                     items_list = list(items)
+                    last_item = items_list[-1] if items_list else None
                     name, batch_name, fn = batch_fn
                     trace.append(batch_name)
                     args = [_eval(a, env, registry, activity_hook, trace, state) for a in body.expr[2][1:]]
                     if state.resolve_secrets and activity_hook is None:
+                        items_list = [_resolve_secrets(item) for item in items_list]
                         args = [_resolve_secrets(arg) for arg in args]
                     results = fn(items_list, *args)
                     results = state.charge_call(name, results)
@@ -415,7 +417,7 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
                             state.tainted.add(body.target)
                     # Batch loops define the result as [] and the loop variable as
                     # None for an empty collection, matching the AOT contract.
-                    env[step.loop_var] = items_list[-1] if items_list else None
+                    env[step.loop_var] = last_item
                 else:
                     for item in items:
                         env[step.loop_var] = item
