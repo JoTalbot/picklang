@@ -1,3 +1,18 @@
+# picklang 0.1.12 (release candidate, not published)
+
+Patch candidate focused on trustworthy measurement, interpreter safety, durable recovery, and MCP transport correctness.
+
+- Harden paired benchmark evidence: reject missing or malformed telemetry, invalid SHA-256 input digests, forged output-match flags, missing preserved outputs, and invalid pricing.
+- Expand offline Interpreter/AOT parity coverage for nested host fields, projections, loops, side-effect ordering, and failure surfaces.
+- Add durable recovery regressions for duplicate signal replay after compaction, execution-lock exclusion, CAS-before-SQLite commit gaps, and saga compensation resume after partial commit.
+- Close optimized interpreter bypasses: batch loops now respect capabilities, taint, token budgets, secret resolution, durable activity hooks, retries, effects, and compensations; parallel assignments preserve taint.
+- Approval for tainted external actions requires the exact boolean `true`, not merely a truthy value.
+- Serialize MCP stdio request/response exchanges and verify JSON-RPC response identity; interleaved notifications are ignored while awaiting the matching response.
+
+Limitations: no new live A/B evaluation was run for this candidate. Full end-to-end token/cost/latency advantage remains unproven. No external MCP/business integrations or production side effects were exercised. External exactly-once effects still require provider-side idempotency. SQLite `WAL + synchronous=NORMAL` is not a power-loss durability guarantee.
+
+---
+
 # picklang 0.1.11
 
 Надёжность восстановления, ограниченное ветвление и проверяемая минификация.
