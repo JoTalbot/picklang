@@ -103,7 +103,6 @@ def test_mcp_client_serializes_concurrent_calls_and_matches_response_ids(tmp_pat
     server.write_text(
         """
 import json
-import json
 import sys
 import threading
 import time
