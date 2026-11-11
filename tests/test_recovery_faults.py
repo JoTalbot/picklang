@@ -329,3 +329,94 @@ def test_unreadable_cas_object_fails_closed_in_verify(tmp_path, monkeypatch):
     assert result["artifacts_ok"] is False
     assert result["bad_artifacts"] == [ref]
     assert result["verified"] is False
+
+
+
+def test_saga_compensation_resumes_after_partial_commit_and_compaction(tmp_path):
+    from durable_weave.saga import Saga
+
+    calls = []
+    effects = {}
+    release_attempts = 0
+
+    def reserve(payload):
+        calls.append(("reserve", payload["_idempotency_key"]))
+        return {"reservation": "r-1"}
+
+    def charge(payload):
+        calls.append(("charge", payload["_idempotency_key"]))
+        return {"transaction": "tx-1"}
+
+    def refund(payload):
+        key = payload["_idempotency_key"]
+        calls.append(("refund", key))
+        effects.setdefault(key, "refunded")
+        return effects[key]
+
+    def release(payload):
+        nonlocal release_attempts
+        key = payload["_idempotency_key"]
+        calls.append(("release", key))
+        if key not in effects:
+            effects[key] = "released"
+        release_attempts += 1
+        if release_attempts == 1:
+            # Simulate a side effect that happened before the handler lost its
+            # acknowledgement. Replay must reuse the key and deduplicate it.
+            raise RuntimeError("injected failure after release side effect")
+        return effects[key]
+
+    handlers = {
+        "reserve": reserve,
+        "charge": charge,
+        "refund": refund,
+        "release": release,
+    }
+
+    def workflow(ctx, inp):
+        reservation = ctx.execute_activity("reserve")
+        payment = ctx.execute_activity("charge")
+        saga = Saga(ctx)
+        saga.add_compensation(
+            "release", {"reservation": reservation["reservation"]}, "reserve-release"
+        )
+        saga.add_compensation(
+            "refund", {"transaction": payment["transaction"]}, "charge-refund"
+        )
+        return {"compensated": saga.compensate()}
+
+    first = DurableExecutor(tmp_path, handlers, snapshot_every=1)
+    failed = first.run("saga", workflow, {})
+    assert failed.status == "FAILED"
+    assert "injected failure" in failed.error
+    assert [name for name, _ in calls] == ["reserve", "charge", "refund", "release"]
+    assert any(event["type"] == "StateSnapshot" for event in first.log.events)
+
+    # Compaction must preserve the committed prefix of the compensation saga.
+    first.log.compact()
+    resumed = DurableExecutor(tmp_path, handlers, snapshot_every=1)
+    recovered = resumed.run("saga", workflow, {})
+    assert recovered.status == "COMPLETED"
+    assert recovered.output == {"compensated": ["refund", "release"]}
+
+    # Forward activities and the already committed refund are replayed, not run.
+    assert [name for name, _ in calls] == [
+        "reserve", "charge", "refund", "release", "release"
+    ]
+    release_keys = [key for name, key in calls if name == "release"]
+    assert len(release_keys) == 2 and release_keys[0] == release_keys[1]
+    assert sum(1 for key, value in effects.items() if value == "released") == 1
+    assert sum(1 for key, value in effects.items() if value == "refunded") == 1
+
+    resumed.log.compact()
+    reopened = DurableExecutor(tmp_path, handlers)
+    repeated = reopened.run("saga", workflow, {})
+    assert repeated.status == "COMPLETED"
+    assert repeated.output == recovered.output
+    assert [name for name, _ in calls] == [
+        "reserve", "charge", "refund", "release", "release"
+    ]
+    verification = DurableExecutor(tmp_path, {}).verify("saga")
+    assert verification["verified"] is True
+    assert verification["chain_ok"] is True
+    assert verification["artifacts_ok"] is True
