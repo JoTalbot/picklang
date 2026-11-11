@@ -4,7 +4,7 @@ import pytest
 
 from durable_weave.slots import SlotStore
 from picklang import run_program
-from picklang.interpreter import BudgetExceeded, TaskNotDone
+from picklang.interpreter import BudgetExceeded, PickRuntimeError, TaskNotDone
 from picklang.result_guard import ToolResultGuard, estimate_tokens
 from picklang.status import status_protocol
 from picklang.stdlib import with_stdlib
@@ -130,7 +130,7 @@ def test_batch_loop_cannot_bypass_capability_allowlist():
         "ship": lambda item: calls.append(("single", item)) or item,
         "ship.batch": lambda items: calls.append(("batch", list(items))) or items,
     }
-    with pytest.raises(Exception, match="capability"):
+    with pytest.raises(PickRuntimeError, match="capability"):
         run_program(
             "> t(xs)\nfor i in xs: y = ship(i)\nout y\n",
             registry,
@@ -154,7 +154,6 @@ def test_batch_loop_preserves_untrusted_taint_at_sinks():
         "charge = bank.charge(page.data, 1)\n"
         "out charge\n"
     )
-    from picklang.interpreter import PickRuntimeError
     with pytest.raises(PickRuntimeError, match="taint"):
         run_program(source, registry, {"xs": ["u1", "u2"]},
                     untrusted={"web.read"}, prefer_aot=False)
@@ -184,7 +183,7 @@ def test_empty_batch_loop_matches_zero_iteration_semantics():
         "ship": lambda item: item,
         "ship.batch": lambda items: calls.append("batch") or list(items),
     }
-    with pytest.raises(Exception, match="не определена"):
+    with pytest.raises(PickRuntimeError, match="не определена"):
         run_program(
             "> t(xs)\nfor i in xs: y = ship(i)\nout y\n",
             registry,
