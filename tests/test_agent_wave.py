@@ -314,21 +314,23 @@ def test_batch_loop_does_not_bypass_durable_activity_hook():
     assert calls == [("ship", [1]), ("ship", [2])]
 
 
-def test_batch_loop_resolves_secrets_before_host_call(monkeypatch):
+def test_batch_loop_resolves_secrets_in_items_and_arguments(monkeypatch):
     monkeypatch.setenv("PICK_BATCH_SECRET", "secret-value")
     seen = []
     registry = {
         "send": lambda item, token: (seen.append((item, token)) or item),
         "send.batch": lambda items, token: (seen.append((list(items), token)) or list(items)),
     }
-    out, *_ = run_program(
+    out, env, _ = run_program(
         "> t(xs, token)\nfor i in xs: y = send(i, token)\nout y\n",
         registry,
-        {"xs": [1, 2], "token": "secret:PICK_BATCH_SECRET"},
+        {"xs": ["secret:PICK_BATCH_SECRET", "public"],
+         "token": "secret:PICK_BATCH_SECRET"},
         prefer_aot=False,
     )
-    assert out == [1, 2]
-    assert seen == [([1, 2], "secret-value")]
+    assert out == ["secret-value", "public"]
+    assert env["i"] == "public"
+    assert seen == [(["secret-value", "public"], "secret-value")]
 
 
 def test_tainted_input_cannot_reach_batched_sensitive_sink():
