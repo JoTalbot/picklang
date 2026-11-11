@@ -258,3 +258,41 @@ def test_nested_collection_projection_keeps_shape_and_order():
     )
     assert result[0] == "ok"
     assert result[1][0] == [[{"id": "a"}, {"id": "b"}], [{"id": "c"}]]
+
+
+@pytest.mark.parametrize(
+    ("source", "inputs", "registry_factory", "expected"),
+    [
+        (
+            '> t()\nout "готово"\n',
+            {},
+            lambda calls, record: {},
+            "готово",
+        ),
+        (
+            '> t(record)\nout record.id\n',
+            {"record": {"id": "R-17", "private": True}},
+            lambda calls, record: {},
+            "R-17",
+        ),
+        (
+            '> t(xs)\nresult = take(xs, 1)\nout result\n',
+            {"xs": ["first", "second"]},
+            lambda calls, record: {"take": lambda xs, n: list(xs)[:n]},
+            ["first"],
+        ),
+        (
+            '> t(x)\na = normalize(x)\nb = decorate(a)\nout b\n',
+            {"x": "  part  "},
+            lambda calls, record: {
+                "normalize": lambda x: x.strip(),
+                "decorate": lambda x: {"label": x.upper()},
+            },
+            {"label": "PART"},
+        ),
+    ],
+)
+def test_additional_parity_edges_match(source, inputs, registry_factory, expected):
+    result = _run_both(source, registry_factory, inputs)
+    assert result[0] == "ok"
+    assert result[1][0] == expected
