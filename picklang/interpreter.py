@@ -397,12 +397,12 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
                     if batch_safe:
                         cand = registry.get(body.expr[1] + ".batch")
                         if cand is not None:
-                            batch_fn = (body.expr[1], cand)
+                            batch_fn = (body.expr[1], body.expr[1] + ".batch", cand)
                 if batch_fn is not None:
                     items_list = list(items)
                     if items_list:
-                        name, fn = batch_fn
-                        trace.append(name)
+                        name, batch_name, fn = batch_fn
+                        trace.append(batch_name)
                         args = [_eval(a, env, registry, activity_hook, trace, state) for a in body.expr[2][1:]]
                         results = fn(items_list, *args)
                         results = state.charge_call(name, results)
