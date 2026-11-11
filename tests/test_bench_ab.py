@@ -25,9 +25,44 @@ def test_cost_unknown_without_complete_rates():
     assert summarize({"a":row("a")})["estimated_cost_usd"] is None
 
 def test_reject_duplicate_tasks(tmp_path):
-    f=tmp_path/"rows.json"; f.write_text('[{"task":"a"},{"task":"a"}]',encoding="utf-8")
+    valid = row("a")
+    f=tmp_path/"rows.json"; f.write_text(__import__("json").dumps([valid, valid]),encoding="utf-8")
     with pytest.raises(ValueError,match="duplicate task"): load_rows(f)
 
 def test_reject_negative_metrics(tmp_path):
-    f=tmp_path/"rows.json"; f.write_text('[{"task":"a","prompt_tokens":-1}]',encoding="utf-8")
-    with pytest.raises(ValueError,match="non-negative"): load_rows(f)
+    import json
+    f = tmp_path / "rows.json"
+    item = row("a", prompt_tokens=-1)
+    f.write_text(json.dumps([item]), encoding="utf-8")
+    with pytest.raises(ValueError, match="non-negative integer"):
+        load_rows(f)
+
+
+
+@pytest.mark.parametrize("invalid", [True, -1, 1.5, float("nan"), float("inf"), "10", None])
+def test_rejects_invalid_numeric_telemetry(tmp_path, invalid):
+    import json
+    f = tmp_path / "rows.json"
+    item = row("a", prompt_tokens=invalid)
+    f.write_text(json.dumps([item]), encoding="utf-8")
+    with pytest.raises(ValueError, match="prompt_tokens"):
+        load_rows(f)
+
+
+def test_rejects_missing_telemetry_instead_of_assuming_zero(tmp_path):
+    import json
+    f = tmp_path / "rows.json"
+    item = row("a")
+    item.pop("completion_tokens")
+    f.write_text(json.dumps([item]), encoding="utf-8")
+    with pytest.raises(ValueError, match="completion_tokens"):
+        load_rows(f)
+
+
+@pytest.mark.parametrize("invalid", [True, -0.1, float("nan"), float("inf"), "0.1", None])
+def test_rejects_invalid_pricing_rates(invalid):
+    with pytest.raises(ValueError, match="invalid pricing"):
+        estimate_cost(row("a"), {"m": {
+            "prompt_per_million": invalid,
+            "completion_per_million": 1.0,
+        }})

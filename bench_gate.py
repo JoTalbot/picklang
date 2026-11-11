@@ -9,6 +9,9 @@ from pathlib import Path
 def evaluate_report(report):
     if not isinstance(report, dict):
         return False, "invalid report: expected a JSON object"
+    schema_version = report.get("schema_version")
+    if type(schema_version) is not int or schema_version != 1:
+        return False, f"invalid report schema_version: expected 1, got {schema_version!r}"
     if report.get("status") == "INCONCLUSIVE_RATE_LIMIT" or report.get("rate_limit_detected"):
         return False, "INCONCLUSIVE: provider rate limit; refusing to publish without efficiency evidence"
     if report.get("status") != "COMPLETED":
@@ -48,7 +51,10 @@ def evaluate_report(report):
                 )
         pick_digest = pick_row.get("input_digest")
         baseline_digest = baseline_row.get("input_digest")
-        if not isinstance(pick_digest, str) or not pick_digest or pick_digest != baseline_digest:
+        if (not isinstance(pick_digest, str)
+                or len(pick_digest) != 64
+                or any(char not in "0123456789abcdef" for char in pick_digest)
+                or pick_digest != baseline_digest):
             return False, f"input integrity failed for {expected_task!r} repeat {expected_repeat}"
         pick_model = pick_row.get("model")
         baseline_model = baseline_row.get("model")
@@ -61,6 +67,22 @@ def evaluate_report(report):
                 f"model mismatch for {expected_task!r} repeat {expected_repeat}: "
                 f"PICK={pick_model!r}, Python={baseline_model!r}"
             )
+        for adapter, row in (("PICK", pick_row), ("Python", baseline_row)):
+            if not isinstance(row.get("ok"), bool):
+                return False, f"invalid success telemetry for {adapter} {expected_task!r} repeat {expected_repeat}"
+            if not isinstance(row.get("output_match"), bool):
+                return False, f"invalid output-match telemetry for {adapter} {expected_task!r} repeat {expected_repeat}"
+            attempts = row.get("attempts")
+            if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 0:
+                return False, f"invalid attempts telemetry for {adapter} {expected_task!r} repeat {expected_repeat}"
+
+        # Do not trust a derived flag alone: independently compare the preserved
+        # adapter outputs before accepting a row as an exact match.
+        if ("output" not in pick_row or "output" not in baseline_row
+                or pick_row["output"] != baseline_row["output"]
+                or pick_row.get("output_match") is not True
+                or baseline_row.get("output_match") is not True):
+            return False, f"output integrity failed for {expected_task!r} repeat {expected_repeat}"
 
     # Token usage is a per-invocation contract: reject missing, negative,
     # boolean, or non-integer telemetry instead of silently treating it as zero.

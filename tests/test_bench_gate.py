@@ -1,4 +1,4 @@
-import copy
+import hashlib
 
 from bench_gate import evaluate_report
 
@@ -10,20 +10,23 @@ def report(pick_tokens=80, baseline_tokens=100):
     for repeat in (1,):
         for index, task in enumerate(tasks):
             pick.append({
-                "task": task, "repeat": repeat, "input_digest": f"digest-{task}",
+                "task": task, "repeat": repeat, "input_digest": hashlib.sha256(task.encode()).hexdigest(),
                 "model": "test-model", "ok": True, "output_match": True,
+                "output": {"task": task, "value": 1}, "attempts": 1,
                 "seconds": 0.25,
                 "prompt_tokens": pick_tokens // 2 if index == 0 else 0,
                 "completion_tokens": pick_tokens - pick_tokens // 2 if index == 0 else 0,
             })
             baseline.append({
-                "task": task, "repeat": repeat, "input_digest": f"digest-{task}",
+                "task": task, "repeat": repeat, "input_digest": hashlib.sha256(task.encode()).hexdigest(),
                 "model": "test-model", "ok": True, "output_match": True,
+                "output": {"task": task, "value": 1}, "attempts": 1,
                 "seconds": 0.30,
                 "prompt_tokens": baseline_tokens // 2 if index == 0 else 0,
                 "completion_tokens": baseline_tokens - baseline_tokens // 2 if index == 0 else 0,
             })
     return {
+        "schema_version": 1,
         "status": "COMPLETED",
         "rate_limit_detected": False,
         "tasks": tasks,
@@ -191,3 +194,52 @@ def test_gate_rejects_boolean_or_non_integer_row_repeat_values():
         passed, message = evaluate_report(candidate)
         assert passed is False
         assert "pairing integrity failed" in message
+
+
+
+def test_gate_recomputes_output_equality_instead_of_trusting_flag():
+    candidate = report()
+    candidate["baseline"][0]["output"] = {"task": "one", "value": "tampered"}
+    candidate["pick"][0]["output_match"] = True
+    candidate["baseline"][0]["output_match"] = True
+    passed, message = evaluate_report(candidate)
+    assert passed is False
+    assert "output integrity failed" in message
+
+
+def test_gate_rejects_malformed_digest_and_missing_output():
+    candidate = report()
+    candidate["pick"][0]["input_digest"] = "not-a-sha256"
+    passed, message = evaluate_report(candidate)
+    assert passed is False
+    assert "input integrity failed" in message
+
+    candidate = report()
+    candidate["baseline"][0].pop("output")
+    passed, message = evaluate_report(candidate)
+    assert passed is False
+    assert "output integrity failed" in message
+
+
+def test_gate_rejects_missing_schema_version_and_invalid_attempts():
+    candidate = report()
+    candidate.pop("schema_version")
+    passed, message = evaluate_report(candidate)
+    assert passed is False
+    assert "schema_version" in message
+
+    for invalid in (True, -1, 1.0, "1", None):
+        candidate = report()
+        candidate["pick"][0]["attempts"] = invalid
+        passed, message = evaluate_report(candidate)
+        assert passed is False
+        assert "attempts telemetry" in message
+
+
+def test_gate_rejects_non_integer_schema_version():
+    for invalid in (True, False, 1.0, "1", None):
+        candidate = report()
+        candidate["schema_version"] = invalid
+        passed, message = evaluate_report(candidate)
+        assert passed is False
+        assert "schema_version" in message
