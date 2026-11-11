@@ -11,7 +11,7 @@ from picklang import run_program
 from picklang.stdlib import with_stdlib
 
 
-def _run_both(source, registry_factory, inputs):
+def _run_both(source, registry_factory, inputs, *, compare_calls=True):
     observed = []
     for prefer_aot in (False, True):
         calls = []
@@ -33,7 +33,9 @@ def _run_both(source, registry_factory, inputs):
         else:
             observed.append(("ok", output, calls))
 
-    assert observed[0] == observed[1], (source, observed)
+    left = observed[0] if compare_calls else observed[0][:-1]
+    right = observed[1] if compare_calls else observed[1][:-1]
+    assert left == right, (source, observed)
     return observed[0]
 
 
@@ -67,6 +69,7 @@ def test_recursive_top_fields_projection_matches():
         source,
         lambda calls, record: with_stdlib({}),
         {"rows": rows},
+        compare_calls=False,  # stdlib built-ins are not external host effects in AOT.
     )
 
     assert result[0] == "ok"
