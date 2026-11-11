@@ -234,3 +234,11 @@ def test_gate_rejects_missing_schema_version_and_invalid_attempts():
         passed, message = evaluate_report(candidate)
         assert passed is False
         assert "attempts telemetry" in message
+
+
+def test_gate_rejects_boolean_schema_version():
+    candidate = report()
+    candidate["schema_version"] = True
+    passed, message = evaluate_report(candidate)
+    assert passed is False
+    assert "schema_version" in message
