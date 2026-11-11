@@ -10,7 +10,12 @@ on:
       run_live:
         description: "Run live Groq cascade (uses API quota)"
         required: false
-        default: true
+        default: false
+        type: boolean
+      publish_release:
+        description: "Publish a versioned GitHub Release (requires run_live=true and all checks passing)"
+        required: false
+        default: false
         type: boolean
       paired_repeats:
         description: "Repeat count for same-model paired A/B benchmark (manual runs only)"
@@ -68,6 +73,25 @@ jobs:
           assert list(Path("dist").glob("*.tar.gz")), "source distribution was not produced"
           print("Wheel and source distribution built successfully.")
           PY
+      - name: Smoke-test built wheel and CLI in a clean environment
+        run: |
+          set -euo pipefail
+          wheel_venv="$(mktemp -d)"
+          python -m venv "$wheel_venv"
+          "$wheel_venv/bin/python" -m pip install --no-deps dist/*.whl
+          (
+            cd "$RUNNER_TEMP"
+            "$wheel_venv/bin/pick" --help
+            "$wheel_venv/bin/python" - <<'PY'
+          import importlib.metadata
+          import picklang
+          import durable_weave
+
+          installed = importlib.metadata.version("picklang")
+          assert picklang.__version__ == durable_weave.__version__ == installed
+          print(f"Clean wheel import/version check passed: {installed}")
+          PY
+          )
 
   tests:
     name: Unit tests and package checks
@@ -151,7 +175,7 @@ jobs:
       github.repository == 'JoTalbot/picklang' &&
       github.ref == 'refs/heads/main' &&
       needs.tests.result == 'success' &&
-      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_live))
+      (github.event_name == 'workflow_dispatch' && inputs.run_live == true)
     # Live provider secrets are used only on trusted main-branch pushes/dispatches.
     runs-on: [self-hosted, linux, arm64]
     timeout-minutes: 25
@@ -404,7 +428,9 @@ jobs:
     if: >-
       github.repository == 'JoTalbot/picklang' &&
       github.ref == 'refs/heads/main' &&
-      github.event_name == 'push' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.publish_release == true &&
+      inputs.run_live == true &&
       needs.tests.result == 'success' &&
       needs.live-openrouter.result == 'success' &&
       needs.temporal-integration.result == 'success'
