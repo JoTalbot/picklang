@@ -275,3 +275,10 @@
 - **Следующий reliability increment:** безопасная уборка оставшихся после аварийного завершения CAS временных файлов. Реализация `recover_temporary_files(min_age=300)` должна удалять только старые `.cas-*.tmp`, не затрагивать свежие файлы, symlink и опубликованные объекты; поведение покрывается offline fault tests.
 - До прохождения CI этого increment не считать принятым. Ручные тесты и live API не запускались; автоматический PR CI остаётся единственным планируемым способом проверки.
 
+
+### SQLite WAL recovery increment · 2026-11-11
+
+- **PR #90 merged:** CAS recovery for abandoned temporary files. CI run `43047731754` completed `success`; Python 3.11/3.12/3.13, package build/smoke and Temporal integration passed. Live Groq and release jobs skipped by design.
+- **Current PR candidate:** deterministic SQLite WAL close/reopen tests cover recovery of committed event batches and exclusion of an aborted multi-event transaction after reopen. These tests do not claim to simulate physical power loss; they validate SQLite's observable transaction and reopen contract.
+- Next acceptance gate: PR CI must pass on all supported Python versions and Temporal integration. No manual tests, live APIs, or release publishing.
+
