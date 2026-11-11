@@ -11,6 +11,7 @@ import json
 import queue
 import subprocess
 import threading
+import time
 from typing import Any, Callable
 
 
@@ -39,12 +40,14 @@ class McpClient:
             self._lines.put(line)
         self._lines.put(None)  # EOF: сервер закрылся
 
-    def _read_response(self, method: str) -> str:
+    def _read_response(self, method: str, deadline: float | None) -> str:
+        remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
         try:
-            line = self._lines.get(timeout=self.timeout) if self.timeout else self._lines.get()
+            line = self._lines.get() if remaining is None else self._lines.get(timeout=remaining)
         except queue.Empty as exc:
+            limit = "без таймаута" if self.timeout is None else f"за {self.timeout:g} с"
             raise McpError(
-                f"MCP-сервер {self.name} не ответил на {method} за {self.timeout:g} с"
+                f"MCP-сервер {self.name} не ответил на {method} {limit}"
             ) from exc
         if line is None:
             raise McpError(f"MCP-сервер {self.name} закрылся, не ответив на {method}")
@@ -68,9 +71,10 @@ class McpClient:
             if notify:
                 return None
 
+            deadline = None if self.timeout is None else time.monotonic() + max(0.0, self.timeout)
             while True:
                 try:
-                    resp = json.loads(self._read_response(method))
+                    resp = json.loads(self._read_response(method, deadline))
                 except json.JSONDecodeError as exc:
                     raise McpError(f"{method}: MCP-сервер вернул некорректный JSON") from exc
                 if not isinstance(resp, dict):
