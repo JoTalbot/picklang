@@ -239,6 +239,18 @@ def _aot_eligible(source: str, activity_hook, capabilities, untrusted) -> bool:
     return all(supported(s) for s in steps)
 
 
+def _expression_calls(expr):
+    """Yield host-call names from a parsed expression tree."""
+    if isinstance(expr, tuple):
+        if expr and expr[0] == "call":
+            yield expr[1]
+        for child in expr[1:]:
+            yield from _expression_calls(child)
+    elif isinstance(expr, list):
+        for child in expr:
+            yield from _expression_calls(child)
+
+
 def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None = None,
                 signal_provider: Callable[[str], Any] | None = None,
                 activity_hook: Callable[[str, Callable, list], Any] | None = None,
@@ -278,7 +290,7 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
     trace: list[str] = []
     state = _State(capabilities=capabilities, untrusted=untrusted)
     state.exact_tokens = any(s.kind == "budget" and s.budget and "tokens" in s.budget for s in steps)
-    state.approved = bool(env.get("approval"))
+    state.approved = env.get("approval") is True
     output = None
     done_conditions: list = []
     def execute_assign(step):
@@ -296,18 +308,7 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
             raise last  # type: ignore[misc]
         if step.target:
             env[step.target] = value
-            def _calls(e):
-                if isinstance(e, tuple):
-                    if e[0] == "call":
-                        yield e[1]
-                    for x in e[1:]:
-                        if isinstance(x, tuple):
-                            yield from _calls(x)
-                        elif isinstance(x, list):
-                            for y in x:
-                                if isinstance(y, tuple):
-                                    yield from _calls(y)
-            if any(c in state.untrusted for c in _calls(step.expr)):
+            if any(name in state.untrusted for name in _expression_calls(step.expr)):
                 state.tainted.add(step.target)
         if step.effect:
             state.effects.append(f"{step.effect}:{step.target or 'step'}")
@@ -363,11 +364,15 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
             elif step.kind == "parallel":
                 def run_branch(branch):
                     target, expr = branch
-                    return target, _eval(expr, dict(env), registry, activity_hook, trace, state)
+                    value = _eval(expr, dict(env), registry, activity_hook, trace, state)
+                    tainted = any(name in state.untrusted for name in _expression_calls(expr))
+                    return target, value, tainted
                 with ThreadPoolExecutor(max_workers=max(2, len(step.branches))) as pool:
-                    for target, value in pool.map(run_branch, step.branches):
+                    for target, value, tainted in pool.map(run_branch, step.branches):
                         if target:
                             env[target] = value
+                            if tainted:
+                                state.tainted.add(target)
             elif step.kind == "loop":
                 items = _eval(step.expr, env, registry, activity_hook, trace, state)
                 body = step.body
@@ -382,18 +387,34 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
                     elementwise = bool(
                         arg_exprs and arg_exprs[0] == ("var", step.loop_var)
                         and not any(_expr_uses_var(a, step.loop_var) for a in arg_exprs[1:]))
-                    if elementwise:
+                    batch_safe = (
+                        elementwise
+                        and (body.retries or 0) == 0
+                        and body.effect is None
+                        and body.compensation is None
+                        and activity_hook is None
+                        and not state.tainted
+                        and (state.capabilities is None or body.expr[1] in state.capabilities)
+                    )
+                    if batch_safe:
                         cand = registry.get(body.expr[1] + ".batch")
                         if cand is not None:
-                            batch_fn = (body.expr[1] + ".batch", cand)
+                            batch_fn = (body.expr[1], body.expr[1] + ".batch", cand)
                 if batch_fn is not None:
-                    name, fn = batch_fn
-                    trace.append(name)
-                    args = [_eval(a, env, registry, activity_hook, trace, state) for a in body.expr[2][1:]]
                     items_list = list(items)
+                    name, batch_name, fn = batch_fn
+                    trace.append(batch_name)
+                    args = [_eval(a, env, registry, activity_hook, trace, state) for a in body.expr[2][1:]]
+                    if state.resolve_secrets and activity_hook is None:
+                        args = [_resolve_secrets(arg) for arg in args]
                     results = fn(items_list, *args)
+                    results = state.charge_call(name, results)
                     if body.target:
                         env[body.target] = results
+                        if name in state.untrusted:
+                            state.tainted.add(body.target)
+                    # Batch loops define the result as [] and the loop variable as
+                    # None for an empty collection, matching the AOT contract.
                     env[step.loop_var] = items_list[-1] if items_list else None
                 else:
                     for item in items:
@@ -423,7 +444,7 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
                     raise WaitingSignal(step.signal)
                 env[step.signal] = value
                 if step.signal == "approval":
-                    state.approved = bool(value)
+                    state.approved = value is True
             elif step.kind == "out":
                 output = _eval(step.expr, env, registry, activity_hook, trace, state)
     except (WaitingSignal, AbortExecution):
