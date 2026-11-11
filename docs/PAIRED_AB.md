@@ -2,7 +2,7 @@
 
 `bench_ab.py` compares recorded PICK and classic-agent runs on the same task set. It makes no API calls and never guesses provider prices.
 
-Each input is a JSON array of rows with a unique `task` name and standard fields `ok`, `model`, `attempts`, `seconds`, `prompt_tokens`, and `completion_tokens`. Missing numeric fields default to zero. The report refuses to compare different task sets.
+Each input is a JSON array of rows with a unique `task` name and required fields `ok` (boolean), `model` (non-empty string), `attempts` (non-negative integer), `seconds` (finite non-negative number), `prompt_tokens` and `completion_tokens` (non-negative integers). Missing or malformed measurements are rejected; they are never silently converted to zero. The report also refuses to compare different task sets. Cost is left unknown unless valid prices are supplied for every model.
 
 ```bash
 python bench_ab.py --pick bench/pick.json --baseline bench/classic.json --write bench/ab-report.md
