@@ -291,3 +291,62 @@ def test_truthy_non_boolean_wait_signal_does_not_approve_tainted_sink():
                     signal_provider=lambda _name: 1,
                     untrusted={"web.read"}, prefer_aot=False)
     assert calls == []
+
+
+
+def test_batch_loop_does_not_bypass_durable_activity_hook():
+    calls = []
+    registry = {
+        "ship": lambda item: item * 10,
+        "ship.batch": lambda items: calls.append("batch") or [item * 10 for item in items],
+    }
+
+    def hook(name, fn, args):
+        calls.append((name, list(args)))
+        return fn(*args)
+
+    out, *_ = run_program(
+        "> t(xs)\\nfor i in xs: y = ship(i)\\nout y\\n",
+        registry,
+        {"xs": [1, 2]},
+        activity_hook=hook,
+        prefer_aot=False,
+    )
+    assert out == [10, 20]
+    assert calls == [("ship", [1]), ("ship", [2])]
+
+
+def test_batch_loop_resolves_secrets_before_host_call(monkeypatch):
+    monkeypatch.setenv("PICK_BATCH_SECRET", "secret-value")
+    seen = []
+    registry = {
+        "send": lambda item, token: (seen.append((item, token)) or item),
+        "send.batch": lambda items, token: (seen.append((list(items), token)) or list(items)),
+    }
+    out, *_ = run_program(
+        '> t(xs)\\nfor i in xs: y = send(i, "secret:PICK_BATCH_SECRET")\\nout y\\n',
+        registry,
+        {"xs": [1, 2]},
+        prefer_aot=False,
+    )
+    assert out == [1, 2]
+    assert seen == [([1, 2], "secret-value")]
+
+
+def test_tainted_input_cannot_reach_batched_sensitive_sink():
+    calls = []
+    registry = {
+        "web.read": lambda url: "untrusted content",
+        "bank.charge": lambda payload, amount: calls.append("single") or {"ok": True},
+        "bank.charge.batch": lambda payloads: calls.append("batch") or [{"ok": True}],
+    }
+    source = (
+        "> t(xs)\\n"
+        "page = web.read("u")\\n"
+        "for i in xs: charge = bank.charge(page.data, i)\\n"
+        "out charge\\n"
+    )
+    with pytest.raises(PickRuntimeError, match="taint"):
+        run_program(source, registry, {"xs": [1, 2]},
+                    untrusted={"web.read"}, prefer_aot=False)
+    assert calls == []
