@@ -20,3 +20,5 @@ Cost is shown only when every model has a rate. Summed per-task durations are no
 ## Release-gate integrity contract
 
 The paired release gate accepts only report `schema_version: 1`. Every row must preserve the task/repeat identity, matching SHA-256 input digest, model identity, success flag, attempt count, finite duration, and non-negative integer token counts. Both adapters' actual `output` values must be present and equal; a supplied `output_match` flag is not trusted as proof by itself. Missing measurements remain invalid rather than being converted to zero.
+
+The release gate is **efficiency-neutral**: it requires complete, successful, exactly matching paired runs, but does not require PICK to use fewer tokens. Token usage is reported as an observed result, including a loss or tie. This avoids turning a release process into a pressure to publish only favorable measurements. A performance claim still requires repeated representative runs, full API usage, cost, latency distributions, and quality validation.
