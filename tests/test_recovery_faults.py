@@ -329,3 +329,74 @@ def test_unreadable_cas_object_fails_closed_in_verify(tmp_path, monkeypatch):
     assert result["artifacts_ok"] is False
     assert result["bad_artifacts"] == [ref]
     assert result["verified"] is False
+
+def test_signal_and_resume_cannot_interleave_with_active_run(tmp_path):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from durable_weave.locking import ExecutionBusy, fcntl
+
+    if fcntl is None:
+        pytest.skip("POSIX flock is required for the execution-lock contract")
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def workflow(ctx, inp):
+        entered.set()
+        assert release.wait(timeout=5)
+        return "finished-before-signal"
+
+    ex = DurableExecutor(tmp_path, {})
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        running = pool.submit(ex.run, "e", workflow, {})
+        assert entered.wait(timeout=5)
+
+        with pytest.raises(ExecutionBusy):
+            ex.deliver_signal("e", "approval", True)
+        assert ex.run("e", workflow, {}).status == "BUSY"
+
+        release.set()
+        assert running.result(timeout=5).status == "COMPLETED"
+
+    ex.deliver_signal("e", "approval", True)
+    event_types = [event["type"] for event in ex.log.events]
+    assert event_types.index("WorkflowCompleted") < event_types.index("SignalReceived")
+
+
+def test_activity_cas_write_before_sqlite_failure_reuses_idempotency_key(tmp_path, monkeypatch):
+    calls = []
+    effects = {}
+    original_append = SQLiteEventLog.append
+    failed_once = False
+
+    def append_with_one_activity_failure(self, type_, data):
+        nonlocal failed_once
+        if type_ == "ActivityCompleted" and not failed_once:
+            failed_once = True
+            raise sqlite3.OperationalError("injected commit failure after CAS write")
+        return original_append(self, type_, data)
+
+    def handler(payload):
+        key = payload["_idempotency_key"]
+        calls.append(key)
+        if key not in effects:
+            effects[key] = 23
+        return effects[key]
+
+    def workflow(ctx, inp):
+        return ctx.execute_activity("charge", {"amount": 23})
+
+    ex = DurableExecutor(tmp_path, {"charge": handler})
+    monkeypatch.setattr(SQLiteEventLog, "append", append_with_one_activity_failure)
+    first = ex.run("e", workflow, {})
+    assert first.status == "FAILED"
+    assert "injected commit failure" in first.error
+
+    monkeypatch.setattr(SQLiteEventLog, "append", original_append)
+    resumed = ex.run("e", workflow, {})
+    assert resumed.status == "COMPLETED"
+    assert resumed.output == 23
+    assert len(calls) == 2
+    assert calls[0] == calls[1] == "0:charge:auto"
+    assert effects == {"0:charge:auto": 23}
