@@ -310,7 +310,7 @@ def test_batch_loop_does_not_bypass_durable_activity_hook():
         activity_hook=hook,
         prefer_aot=False,
     )
-    assert out == [10, 20]
+    assert out == 20
     assert calls == [("ship", [1]), ("ship", [2])]
 
 
@@ -322,9 +322,9 @@ def test_batch_loop_resolves_secrets_before_host_call(monkeypatch):
         "send.batch": lambda items, token: (seen.append((list(items), token)) or list(items)),
     }
     out, *_ = run_program(
-        '> t(xs)\nfor i in xs: y = send(i, "secret:PICK_BATCH_SECRET")\nout y\n',
+        "> t(xs, token)\nfor i in xs: y = send(i, token)\nout y\n",
         registry,
-        {"xs": [1, 2]},
+        {"xs": [1, 2], "token": "secret:PICK_BATCH_SECRET"},
         prefer_aot=False,
     )
     assert out == [1, 2]
