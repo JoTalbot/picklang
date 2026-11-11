@@ -106,9 +106,11 @@ import json
 import sys
 import threading
 import time
+from pathlib import Path
 
 write_lock = threading.Lock()
 workers = []
+marker = sys.argv[1]
 
 def respond(message, result):
     response = {"jsonrpc": "2.0", "id": message["id"], "result": result}
@@ -117,6 +119,8 @@ def respond(message, result):
 
 def handle(message):
     value = message["params"]["arguments"]["value"]
+    if value == "slow":
+        Path(marker).write_text("received", encoding="utf-8")
     time.sleep(0.15 if value == "slow" else 0.01)
     if value == "slow":
         with write_lock:
@@ -145,14 +149,63 @@ for worker in workers:
 """,
         encoding="utf-8",
     )
-    client = McpClient([sys.executable, str(server)], name="parallel", timeout=5)
+    client = McpClient([sys.executable, str(server), str(tmp_path / "slow-received")], name="parallel", timeout=5)
     try:
         client.connect()
         with ThreadPoolExecutor(max_workers=2) as pool:
             slow = pool.submit(client.call_tool, "echo", {"value": "slow"})
-            time.sleep(0.02)
+            marker = tmp_path / "slow-received"
+            deadline = time.monotonic() + 2
+            while not marker.exists() and time.monotonic() < deadline:
+                time.sleep(0.005)
+            assert marker.exists(), "slow MCP request did not reach the server"
             fast = pool.submit(client.call_tool, "echo", {"value": "fast"})
             assert slow.result(timeout=5) == "slow"
             assert fast.result(timeout=5) == "fast"
+    finally:
+        client.close()
+
+
+
+def test_mcp_client_uses_total_deadline_when_server_streams_notifications(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+
+    from picklang.mcp import McpClient, McpError
+
+    server = tmp_path / "notification_flood.py"
+    server.write_text(
+        """
+import json
+import sys
+import time
+
+def respond(message, result):
+    print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}), flush=True)
+
+for line in sys.stdin:
+    message = json.loads(line)
+    if message["method"] == "initialize":
+        respond(message, {"protocolVersion": "2024-11-05", "capabilities": {},
+                          "serverInfo": {"name": "test", "version": "1"}})
+    elif message["method"] == "tools/list":
+        respond(message, {"tools": [{"name": "echo", "inputSchema": {"type": "object"}}]})
+    elif message["method"] == "tools/call":
+        while True:
+            print(json.dumps({"jsonrpc": "2.0", "method": "notifications/progress",
+                              "params": {"message": "still working"}}), flush=True)
+            time.sleep(0.01)
+""",
+        encoding="utf-8",
+    )
+    client = McpClient([sys.executable, str(server)], name="notification-flood", timeout=0.15)
+    try:
+        client.connect()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(client.call_tool, "echo", {})
+            with pytest.raises(McpError, match="не ответил"):
+                try:
+                    pending.result(timeout=2)
+                except TimeoutError:
+                    pytest.fail("MCP notifications reset the request deadline")
     finally:
         client.close()
