@@ -30,8 +30,12 @@ def test_reject_duplicate_tasks(tmp_path):
     with pytest.raises(ValueError,match="duplicate task"): load_rows(f)
 
 def test_reject_negative_metrics(tmp_path):
-    f=tmp_path/"rows.json"; f.write_text('[{"task":"a","prompt_tokens":-1}]',encoding="utf-8")
-    with pytest.raises(ValueError,match="non-negative"): load_rows(f)
+    import json
+    f = tmp_path / "rows.json"
+    item = row("a", prompt_tokens=-1)
+    f.write_text(json.dumps([item]), encoding="utf-8")
+    with pytest.raises(ValueError, match="non-negative integer"):
+        load_rows(f)
 
 
 
