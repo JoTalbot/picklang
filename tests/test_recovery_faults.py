@@ -355,3 +355,163 @@ def test_duplicate_signal_is_idempotent_across_snapshot_compaction_and_reopen(tm
     assert sum(event["type"] == "SignalReceived" for event in reopened.log.history()) == 1
     assert reopened.run("e", workflow, {}).output == 42
     assert calls == ["0:f:auto"]
+
+def test_signal_and_resume_cannot_interleave_with_active_run(tmp_path):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from durable_weave.locking import ExecutionBusy, fcntl
+
+    if fcntl is None:
+        pytest.skip("POSIX flock is required for the execution-lock contract")
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def workflow(ctx, inp):
+        entered.set()
+        assert release.wait(timeout=5)
+        return "finished-before-signal"
+
+    ex = DurableExecutor(tmp_path, {})
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        running = pool.submit(ex.run, "e", workflow, {})
+        assert entered.wait(timeout=5)
+
+        with pytest.raises(ExecutionBusy):
+            ex.deliver_signal("e", "approval", True)
+        assert ex.run("e", workflow, {}).status == "BUSY"
+
+        release.set()
+        assert running.result(timeout=5).status == "COMPLETED"
+
+    ex.deliver_signal("e", "approval", True)
+    event_types = [event["type"] for event in ex.log.events]
+    assert event_types.index("WorkflowCompleted") < event_types.index("SignalReceived")
+
+
+def test_activity_cas_write_before_sqlite_failure_reuses_idempotency_key(tmp_path, monkeypatch):
+    calls = []
+    effects = {}
+    original_append = SQLiteEventLog.append
+    failed_once = False
+
+    def append_with_one_activity_failure(self, type_, data):
+        nonlocal failed_once
+        if type_ == "ActivityCompleted" and not failed_once:
+            failed_once = True
+            raise sqlite3.OperationalError("injected commit failure after CAS write")
+        return original_append(self, type_, data)
+
+    def handler(payload):
+        key = payload["_idempotency_key"]
+        calls.append(key)
+        if key not in effects:
+            effects[key] = 23
+        return effects[key]
+
+    def workflow(ctx, inp):
+        return ctx.execute_activity("charge", {"amount": 23})
+
+    ex = DurableExecutor(tmp_path, {"charge": handler})
+    monkeypatch.setattr(SQLiteEventLog, "append", append_with_one_activity_failure)
+    first = ex.run("e", workflow, {})
+    assert first.status == "FAILED"
+    assert "injected commit failure" in first.error
+
+    monkeypatch.setattr(SQLiteEventLog, "append", original_append)
+    resumed = ex.run("e", workflow, {})
+    assert resumed.status == "COMPLETED"
+    assert resumed.output == 23
+    assert len(calls) == 2
+    assert calls[0] == calls[1] == "0:charge:auto"
+    assert effects == {"0:charge:auto": 23}
+
+def test_saga_compensation_resumes_after_partial_commit_and_compaction(tmp_path):
+    from durable_weave.saga import Saga
+
+    calls = []
+    effects = {}
+    release_attempts = 0
+
+    def reserve(payload):
+        calls.append(("reserve", payload["_idempotency_key"]))
+        return {"reservation": "r-1"}
+
+    def charge(payload):
+        calls.append(("charge", payload["_idempotency_key"]))
+        return {"transaction": "tx-1"}
+
+    def refund(payload):
+        key = payload["_idempotency_key"]
+        calls.append(("refund", key))
+        effects.setdefault(key, "refunded")
+        return effects[key]
+
+    def release(payload):
+        nonlocal release_attempts
+        key = payload["_idempotency_key"]
+        calls.append(("release", key))
+        if key not in effects:
+            effects[key] = "released"
+        release_attempts += 1
+        if release_attempts == 1:
+            # Simulate a side effect that happened before the handler lost its
+            # acknowledgement. Replay must reuse the key and deduplicate it.
+            raise RuntimeError("injected failure after release side effect")
+        return effects[key]
+
+    handlers = {
+        "reserve": reserve,
+        "charge": charge,
+        "refund": refund,
+        "release": release,
+    }
+
+    def workflow(ctx, inp):
+        reservation = ctx.execute_activity("reserve")
+        payment = ctx.execute_activity("charge")
+        saga = Saga(ctx)
+        saga.add_compensation(
+            "release", {"reservation": reservation["reservation"]}, "reserve-release"
+        )
+        saga.add_compensation(
+            "refund", {"transaction": payment["transaction"]}, "charge-refund"
+        )
+        return {"compensated": saga.compensate()}
+
+    first = DurableExecutor(tmp_path, handlers, snapshot_every=1)
+    failed = first.run("saga", workflow, {})
+    assert failed.status == "FAILED"
+    assert "injected failure" in failed.error
+    assert [name for name, _ in calls] == ["reserve", "charge", "refund", "release"]
+    assert any(event["type"] == "StateSnapshot" for event in first.log.events)
+
+    # Compaction must preserve the committed prefix of the compensation saga.
+    first.log.compact()
+    resumed = DurableExecutor(tmp_path, handlers, snapshot_every=1)
+    recovered = resumed.run("saga", workflow, {})
+    assert recovered.status == "COMPLETED"
+    assert recovered.output == {"compensated": ["refund", "release"]}
+
+    # Forward activities and the already committed refund are replayed, not run.
+    assert [name for name, _ in calls] == [
+        "reserve", "charge", "refund", "release", "release"
+    ]
+    release_keys = [key for name, key in calls if name == "release"]
+    assert len(release_keys) == 2 and release_keys[0] == release_keys[1]
+    assert sum(1 for key, value in effects.items() if value == "released") == 1
+    assert sum(1 for key, value in effects.items() if value == "refunded") == 1
+
+    resumed.log.compact()
+    reopened = DurableExecutor(tmp_path, handlers)
+    repeated = reopened.run("saga", workflow, {})
+    assert repeated.status == "COMPLETED"
+    assert repeated.output == recovered.output
+    assert [name for name, _ in calls] == [
+        "reserve", "charge", "refund", "release", "release"
+    ]
+    verification = DurableExecutor(tmp_path, {}).verify("saga")
+    assert verification["verified"] is True
+    assert verification["chain_ok"] is True
+    assert verification["artifacts_ok"] is True
