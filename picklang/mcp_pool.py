@@ -20,7 +20,13 @@ class McpPool:
         key = tuple(command)
         if key not in self._clients:
             client = McpClient(command, name=name)
-            client.connect()
+            try:
+                client.connect()
+            except BaseException:
+                # A failed handshake must not orphan a subprocess that was never
+                # inserted into the pool and therefore cannot be closed by close_all().
+                client.close()
+                raise
             self._clients[key] = client
             self.stats["connects"] += 1
         return self._clients[key]
