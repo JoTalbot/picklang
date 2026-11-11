@@ -282,3 +282,14 @@
 - **Current PR candidate:** deterministic SQLite WAL close/reopen tests cover recovery of committed event batches and exclusion of an aborted multi-event transaction after reopen. These tests do not claim to simulate physical power loss; they validate SQLite's observable transaction and reopen contract.
 - Next acceptance gate: PR CI must pass on all supported Python versions and Temporal integration. No manual tests, live APIs, or release publishing.
 
+
+
+## Обновление после публикации v0.1.12 (2026-11-11, после PR #91)
+
+- Последний опубликованный релиз остаётся `v0.1.12`, тег указывает на release commit `56ad8fce7e4e13bd0ef854cc58e9c3b29b3164f4`; последующие изменения не меняют уже опубликованный артефакт.
+- PR #88–#90 интегрированы в `main`: качество paired benchmark gate сделано независимым от эффективности; расширен offline Interpreter/AOT semantic parity corpus; добавлено безопасное восстановление abandoned CAS temporary files.
+- PR #91 интегрирован в `main`: SQLite WAL close/reopen проверяет сохранение подтверждённых event batches, hash chain и отсутствие частичных событий после abort. Это не моделирует физическую потерю питания.
+- HEAD после merge PR #91: `f87642fe83808e129112cd5ec511349ef26bb66f`.
+- PR #91 CI прошёл на PR head; отдельный post-merge push workflow `43048225515` также завершился `success`.
+- Следующий инженерный фокус: durable fault-injection matrix (CAS/SQLite/replay/wait/resume/compensation), затем tool/security boundary и честный end-to-end benchmark. Live API, ручные тесты, workflow_dispatch и публикация следующего релиза остаются закрытыми без отдельного разрешения.
+- Классический подход обычно разносит orchestration, recovery, state и проверки по библиотекам/инфраструктуре; PICK стремится дать единый проверяемый IR и durable execution contract. Преимущество по стоимости и задержке не считать доказанным без повторяемого paired end-to-end benchmark.
