@@ -36,16 +36,22 @@ def report(pick_tokens=80, baseline_tokens=100):
     }
 
 
-def test_gate_passes_only_when_all_tasks_match_and_pick_uses_fewer_tokens():
+def test_gate_passes_with_token_savings_and_reports_them():
     passed, message = evaluate_report(report())
     assert passed is True
     assert "20.0% less" in message
+    assert "not used as a release gate" in message
 
 
-def test_gate_rejects_no_token_savings():
+def test_gate_does_not_require_token_savings_to_publish_a_correct_release():
     passed, message = evaluate_report(report(pick_tokens=100, baseline_tokens=100))
-    assert passed is False
-    assert "efficiency gate failed" in message
+    assert passed is True
+    assert "equal reported token usage" in message
+
+    passed, message = evaluate_report(report(pick_tokens=120, baseline_tokens=100))
+    assert passed is True
+    assert "20.0% more" in message
+    assert "quality gate passed" in message
 
 
 def test_gate_rejects_task_failure_or_output_mismatch():
