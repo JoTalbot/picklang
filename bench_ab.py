@@ -7,12 +7,12 @@ from pathlib import Path
 
 
 def _non_negative_number(value):
-    return (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-        and value >= 0
-    )
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def load_rows(path):
@@ -50,9 +50,12 @@ def estimate_cost(row, prices):
     rates = (price.get("prompt_per_million"), price.get("completion_per_million"))
     if not all(_non_negative_number(value) for value in rates):
         raise ValueError(f"invalid pricing for model {row.get('model')!r}")
-    return (
+    cost = (
         row["prompt_tokens"] * rates[0] + row["completion_tokens"] * rates[1]
     ) / 1_000_000
+    if not math.isfinite(cost):
+        raise ValueError(f"estimated cost is not finite for model {row.get('model')!r}")
+    return cost
 
 
 def summarize(rows, prices=None):
