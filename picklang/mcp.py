@@ -25,6 +25,7 @@ class McpClient:
         self.proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      text=True, encoding="utf-8")
         self._id = 0
+        self._request_lock = threading.Lock()
         self.tools: list[dict[str, Any]] = []
         # Читаем stdout в отдельном потоке: readline() без таймаута вешает клиента
         # навсегда, если сервер принял соединение и молчит.
@@ -50,21 +51,44 @@ class McpClient:
         return line
 
     def _send(self, method: str, params: dict | None = None, notify: bool = False) -> Any:
-        self._id += 1
-        msg: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
-        if not notify:
-            msg["id"] = self._id
-        if params:
-            msg["params"] = params
-        assert self.proc.stdin is not None
-        self.proc.stdin.write(json.dumps(msg) + "\n")
-        self.proc.stdin.flush()
-        if notify:
-            return None
-        resp = json.loads(self._read_response(method))
-        if "error" in resp:
-            raise McpError(f"{method}: {resp['error']}")
-        return resp.get("result")
+        # stdio is a single request/response stream. Serialize the whole exchange so
+        # parallel PICK branches cannot consume each other's responses.
+        with self._request_lock:
+            msg: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
+            request_id = None
+            if not notify:
+                self._id += 1
+                request_id = self._id
+                msg["id"] = request_id
+            if params:
+                msg["params"] = params
+            assert self.proc.stdin is not None
+            self.proc.stdin.write(json.dumps(msg) + "\n")
+            self.proc.stdin.flush()
+            if notify:
+                return None
+
+            while True:
+                try:
+                    resp = json.loads(self._read_response(method))
+                except json.JSONDecodeError as exc:
+                    raise McpError(f"{method}: MCP-сервер вернул некорректный JSON") from exc
+                if not isinstance(resp, dict):
+                    raise McpError(f"{method}: MCP-сервер вернул не объект JSON-RPC")
+                # Notifications may be interleaved with a request response and have
+                # no id. They are not the answer to the outstanding request.
+                if "id" not in resp:
+                    continue
+                if resp.get("jsonrpc") != "2.0" or resp.get("id") != request_id:
+                    raise McpError(
+                        f"{method}: неверная идентичность JSON-RPC ответа "
+                        f"(ожидался id={request_id}, получен id={resp.get('id')!r})"
+                    )
+                if "error" in resp:
+                    raise McpError(f"{method}: {resp['error']}")
+                if "result" not in resp:
+                    raise McpError(f"{method}: JSON-RPC ответ не содержит result")
+                return resp["result"]
 
     def connect(self) -> list[dict[str, Any]]:
         self._send("initialize", {"protocolVersion": "2024-11-05",

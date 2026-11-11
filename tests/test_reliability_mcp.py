@@ -94,3 +94,65 @@ def test_mcp_client_kills_process_when_terminate_times_out():
 
     assert events == ["terminate", "wait", "kill", "wait", "join"]
 
+def test_mcp_client_serializes_concurrent_calls_and_matches_response_ids(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from picklang.mcp import McpClient
+
+    server = tmp_path / "concurrent_mcp.py"
+    server.write_text(
+        """
+import json
+import sys
+import threading
+import time
+
+write_lock = threading.Lock()
+workers = []
+
+def respond(message, result):
+    response = {"jsonrpc": "2.0", "id": message["id"], "result": result}
+    with write_lock:
+        print(json.dumps(response), flush=True)
+
+def handle(message):
+    value = message["params"]["arguments"]["value"]
+    time.sleep(0.15 if value == "slow" else 0.01)
+    if value == "slow":
+        with write_lock:
+            print(json.dumps({"jsonrpc": "2.0", "method": "notifications/progress",
+                              "params": {"message": "working"}}), flush=True)
+    respond(message, {"content": [{"type": "text", "text": json.dumps(value)}]})
+
+for line in sys.stdin:
+    message = json.loads(line)
+    method = message["method"]
+    if method == "initialize":
+        respond(message, {"protocolVersion": "2024-11-05", "capabilities": {},
+                          "serverInfo": {"name": "test", "version": "1"}})
+    elif method == "tools/list":
+        respond(message, {"tools": [{"name": "echo", "inputSchema": {
+            "type": "object", "properties": {"value": {"type": "string"}}}}]})
+    elif method == "tools/call":
+        worker = threading.Thread(target=handle, args=(message,))
+        worker.start()
+        workers.append(worker)
+    elif method == "notifications/initialized":
+        pass
+
+for worker in workers:
+    worker.join()
+""",
+        encoding="utf-8",
+    )
+    client = McpClient([sys.executable, str(server)], name="parallel", timeout=5)
+    try:
+        client.connect()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            slow = pool.submit(client.call_tool, "echo", {"value": "slow"})
+            time.sleep(0.02)
+            fast = pool.submit(client.call_tool, "echo", {"value": "fast"})
+            assert slow.result(timeout=5) == "slow"
+            assert fast.result(timeout=5) == "fast"
+    finally:
+        client.close()
