@@ -15,3 +15,8 @@ python bench_ab.py --pick bench/pick.json --baseline bench/classic.json --pick-p
 ```
 
 Cost is shown only when every model has a rate. Summed per-task durations are not necessarily wall-clock elapsed time if tasks ran concurrently. Passing a validator does not prove equivalent user-facing quality; repeat runs and inspect outputs before claiming a general advantage.
+
+
+## Release-gate integrity contract
+
+The paired release gate accepts only report `schema_version: 1`. Every row must preserve the task/repeat identity, matching SHA-256 input digest, model identity, success flag, attempt count, finite duration, and non-negative integer token counts. Both adapters' actual `output` values must be present and equal; a supplied `output_match` flag is not trusted as proof by itself. Missing measurements remain invalid rather than being converted to zero.
