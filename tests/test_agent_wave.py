@@ -132,7 +132,7 @@ def test_batch_loop_cannot_bypass_capability_allowlist():
     }
     with pytest.raises(Exception, match="capability"):
         run_program(
-            "> t(xs)\\nfor i in xs: y = ship(i)\\nout y\\n",
+            "> t(xs)\nfor i in xs: y = ship(i)\nout y\n",
             registry,
             {"xs": [1, 2]},
             capabilities={"other"},
@@ -149,10 +149,10 @@ def test_batch_loop_preserves_untrusted_taint_at_sinks():
         "bank.charge": lambda payload, amount: calls.append("charge") or {"ok": True},
     }
     source = (
-        "> t(xs)\\n"
-        "for i in xs: page = web.read(i)\\n"
-        "charge = bank.charge(page.data, 1)\\n"
-        "out charge\\n"
+        "> t(xs)\n"
+        "for i in xs: page = web.read(i)\n"
+        "charge = bank.charge(page.data, 1)\n"
+        "out charge\n"
     )
     from picklang.interpreter import PickRuntimeError
     with pytest.raises(PickRuntimeError, match="taint"):
@@ -168,10 +168,10 @@ def test_batch_loop_charges_result_token_budget():
         "ship.batch": lambda items: calls.append("batch") or [item * 10 for item in items],
     }
     source = (
-        "> t(xs)\\n"
-        "!budget tokens<1\\n"
-        "for i in xs: y = ship(i)\\n"
-        "out y\\n"
+        "> t(xs)\n"
+        "!budget tokens<1\n"
+        "for i in xs: y = ship(i)\n"
+        "out y\n"
     )
     with pytest.raises(BudgetExceeded):
         run_program(source, registry, {"xs": [1, 2, 3]}, prefer_aot=False)
@@ -186,7 +186,7 @@ def test_empty_batch_loop_matches_zero_iteration_semantics():
     }
     with pytest.raises(Exception, match="не определена"):
         run_program(
-            "> t(xs)\\nfor i in xs: y = ship(i)\\nout y\\n",
+            "> t(xs)\nfor i in xs: y = ship(i)\nout y\n",
             registry,
             {"xs": []},
             prefer_aot=False,
@@ -202,10 +202,10 @@ def test_batch_loop_does_not_skip_saga_compensations():
         "release": lambda item: calls.append(("release", item)),
     }
     source = (
-        "> t(xs)\\n"
-        "for i in xs: y = ship(i) ! release(i)\\n"
-        "? false -> fail \\"force rollback\\"\\n"
-        "out y\\n"
+        "> t(xs)\n"
+        "for i in xs: y = ship(i) ! release(i)\n"
+        "? false -> fail \"force rollback\"\n"
+        "out y\n"
     )
     from picklang.interpreter import PickRuntimeError
     with pytest.raises(PickRuntimeError, match="guard failed"):
@@ -223,10 +223,10 @@ def test_parallel_untrusted_result_remains_tainted():
         "bank.charge": lambda payload, amount: calls.append("charge") or {"ok": True},
     }
     source = (
-        "> t(url)\\n"
-        "page = web.read(url) || safe = other()\\n"
-        "charge = bank.charge(page.data, 1)\\n"
-        "out charge\\n"
+        "> t(url)\n"
+        "page = web.read(url) || safe = other()\n"
+        "charge = bank.charge(page.data, 1)\n"
+        "out charge\n"
     )
     from picklang.interpreter import PickRuntimeError
     with pytest.raises(PickRuntimeError, match="taint"):
@@ -243,10 +243,10 @@ def test_truthy_non_boolean_approval_does_not_release_untrusted_sink(approval):
         "bank.charge": lambda payload, amount: calls.append("charge") or {"ok": True},
     }
     source = (
-        "> t(url)\\n"
-        "page = web.read(url)\\n"
-        "charge = bank.charge(page.data, 1)\\n"
-        "out charge\\n"
+        "> t(url)\n"
+        "page = web.read(url)\n"
+        "charge = bank.charge(page.data, 1)\n"
+        "out charge\n"
     )
     from picklang.interpreter import PickRuntimeError
     with pytest.raises(PickRuntimeError, match="taint"):
@@ -262,12 +262,34 @@ def test_boolean_true_approval_releases_untrusted_sink():
         "bank.charge": lambda payload, amount: calls.append("charge") or {"ok": True},
     }
     source = (
-        "> t(url)\\n"
-        "page = web.read(url)\\n"
-        "charge = bank.charge(page.data, 1)\\n"
-        "out charge\\n"
+        "> t(url)\n"
+        "page = web.read(url)\n"
+        "charge = bank.charge(page.data, 1)\n"
+        "out charge\n"
     )
     out, *_ = run_program(source, registry, {"url": "u", "approval": True},
                           untrusted={"web.read"}, prefer_aot=False)
     assert out == {"ok": True}
     assert calls == ["charge"]
+
+
+
+def test_truthy_non_boolean_wait_signal_does_not_approve_tainted_sink():
+    calls = []
+    registry = {
+        "web.read": lambda url: "untrusted content",
+        "bank.charge": lambda payload, amount: calls.append("charge") or {"ok": True},
+    }
+    source = (
+        "> t(url)\n"
+        "@wait approval\n"
+        "page = web.read(url)\n"
+        "charge = bank.charge(page.data, 1)\n"
+        "out charge\n"
+    )
+    from picklang.interpreter import PickRuntimeError
+    with pytest.raises(PickRuntimeError, match="taint"):
+        run_program(source, registry, {"url": "u"},
+                    signal_provider=lambda _name: 1,
+                    untrusted={"web.read"}, prefer_aot=False)
+    assert calls == []
