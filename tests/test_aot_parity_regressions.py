@@ -273,3 +273,20 @@ def test_wait_timeout_else_preserved_in_ir_and_aot_fails_closed():
     result = both(src, lambda calls: {"notify": lambda x: calls.append(x) or x}, {"x": 1})
     assert result[1][0] == 1
     assert result[2] == [1]
+
+
+def test_fused_top_fields_preserves_recursive_fields_semantics():
+    source = '> t(rows)\nprojected = rows >> top(1) >> fields("v")\nout projected\n'
+    nested = [
+        [{"v": 1, "private": "a"}, {"v": 2, "private": "b"}],
+        [{"v": 3, "private": "c"}],
+    ]
+    results = []
+    for prefer_aot in (False, True):
+        out, env, _trace = run_program(
+            source, with_stdlib({}), {"rows": nested}, prefer_aot=prefer_aot)
+        results.append((out, env))
+
+    # Fusion intentionally changes the call trace; semantic output and env must match.
+    assert results[0] == results[1]
+    assert results[0][0] == [[{"v": 1}, {"v": 2}]]
