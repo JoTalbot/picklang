@@ -8,10 +8,12 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import json
 import os
 import re
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +85,39 @@ class ContentAddressedStore:
             finally:
                 tmp.unlink(missing_ok=True)
         return ref
+
+    def recover_temporary_files(self, min_age: float = 300.0) -> dict[str, int]:
+        """Remove abandoned CAS temp files older than min_age seconds.
+
+        Writers create unique temp files in the target shard and atomically
+        rename only after flushing. Recovery never promotes a temp file; it
+        removes only old leftovers and leaves recent files to active writers.
+        """
+        if isinstance(min_age, bool) or not isinstance(min_age, (int, float)):
+            raise ValueError("min_age must be a finite non-negative number")
+        if not math.isfinite(min_age) or min_age < 0:
+            raise ValueError("min_age must be a finite non-negative number")
+
+        cutoff = time.time() - float(min_age)
+        removed = 0
+        removed_bytes = 0
+        for shard in self.objects.iterdir():
+            if not shard.is_dir() or shard.is_symlink():
+                continue
+            for candidate in shard.glob(".cas-*.tmp"):
+                try:
+                    if candidate.is_symlink() or not candidate.is_file():
+                        continue
+                    stat = candidate.stat()
+                    if stat.st_mtime > cutoff:
+                        continue
+                    candidate.unlink()
+                    removed += 1
+                    removed_bytes += stat.st_size
+                except FileNotFoundError:
+                    # Another recovery process may have removed it first.
+                    continue
+        return {"removed_temporary_files": removed, "removed_bytes": removed_bytes}
 
     def put_json(self, obj: Any) -> str:
         return self.put_bytes(canonical_json(obj))
