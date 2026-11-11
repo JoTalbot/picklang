@@ -134,10 +134,17 @@ def evaluate_report(report):
             f"classic Python {baseline_tokens} tokens"
         )
     saved = baseline_tokens - pick_tokens
-    pct = saved / baseline_tokens * 100
+    if saved > 0:
+        efficiency = f"{saved} fewer tokens ({saved / baseline_tokens * 100:.1f}% less)"
+    elif saved < 0:
+        extra = -saved
+        efficiency = f"{extra} more tokens ({extra / baseline_tokens * 100:.1f}% more)"
+    else:
+        efficiency = "equal reported token usage"
     return True, (
-        f"quality and efficiency gates passed: {planned}/{planned} matched tasks; "
-        f"PICK {pick_tokens} tokens vs Python {baseline_tokens} ({saved} saved, {pct:.1f}% less)"
+        f"quality gate passed: {planned}/{planned} paired task-runs succeeded with exact outputs; "
+        f"PICK {pick_tokens} tokens vs Python {baseline_tokens} ({efficiency}); "
+        "efficiency is reported, not used as a release gate"
     )
 
 
