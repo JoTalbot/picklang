@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sqlite3
 
 import pytest
@@ -75,6 +76,20 @@ def test_corrupt_journal_stops_before_handler(tmp_path):
     assert calls == [1]
 
 
+def test_malformed_archived_event_json_fails_closed_in_verify(tmp_path):
+    def workflow(ctx, inp):
+        return ctx.execute_activity('f')
+    ex = DurableExecutor(tmp_path, {'f': lambda p: 42}, snapshot_every=1)
+    assert ex.run('e', workflow, {}).status == 'COMPLETED'
+    ex.log.compact()
+    with ex.log.db:
+        ex.log.db.execute("UPDATE archive SET data='{' WHERE seq=0")
+    result = ex.verify('e')
+    assert result['status'] == 'CORRUPT'
+    assert result['verified'] is False
+    assert 'invalid JSON' in result['chain_detail']
+
+
 def test_corrupt_result_is_not_replayed(tmp_path):
     calls = []
     def workflow(ctx, inp):
@@ -139,3 +154,178 @@ def test_async_failed_frontier_waits_for_other_started_handlers(tmp_path):
         assert completed == ['settled']
         assert ex._completed == {} and ex.log.events == []
     asyncio.run(run())
+
+def test_malformed_event_json_fails_closed_in_run_and_verify(tmp_path):
+    calls = []
+    def workflow(ctx, inp):
+        return ctx.execute_activity('f')
+    ex = DurableExecutor(tmp_path, {'f': lambda p: calls.append(1) or 42})
+    assert ex.run('e', workflow, {}).status == 'COMPLETED'
+    db_path = tmp_path / 'executions' / 'e' / 'events.db'
+    with sqlite3.connect(db_path) as db:
+        db.execute("UPDATE events SET data='{' WHERE seq=0")
+
+    result = DurableExecutor(tmp_path, {'f': lambda p: calls.append(1) or 99}).run('e', workflow, {})
+    assert result.status == 'FAILED'
+    assert 'invalid JSON' in result.error
+    verification = DurableExecutor(tmp_path, {}).verify('e')
+    assert verification['status'] == 'CORRUPT'
+    assert verification['verified'] is False
+    assert calls == [1]
+
+def test_malformed_archived_event_json_stops_run_before_handler(tmp_path):
+    calls = []
+
+    def workflow(ctx, inp):
+        return ctx.execute_activity('f')
+
+    ex = DurableExecutor(tmp_path, {'f': lambda p: calls.append(1) or 42}, snapshot_every=1)
+    assert ex.run('e', workflow, {}).status == 'COMPLETED'
+    ex.log.compact()
+    with ex.log.db:
+        ex.log.db.execute("UPDATE archive SET data='{' WHERE seq=0")
+
+    result = DurableExecutor(tmp_path, {'f': lambda p: calls.append(1) or 99}).run('e', workflow, {})
+    assert result.status == 'FAILED'
+    assert 'invalid JSON' in result.error
+    assert calls == [1]
+
+
+@pytest.mark.parametrize("location", ["events", "archive"])
+def test_non_object_event_json_fails_closed_in_run_and_verify(tmp_path, location):
+    calls = []
+
+    def workflow(ctx, inp):
+        return ctx.execute_activity("f")
+
+    ex = DurableExecutor(tmp_path, {"f": lambda p: calls.append(1) or 42},
+                         snapshot_every=1 if location == "archive" else None)
+    assert ex.run("e", workflow, {}).status == "COMPLETED"
+    if location == "archive":
+        ex.log.compact()
+        table = "archive"
+    else:
+        table = "events"
+    with ex.log.db:
+        ex.log.db.execute(f"UPDATE {table} SET data='[]' WHERE seq=0")
+
+    result = DurableExecutor(tmp_path, {"f": lambda p: calls.append(1) or 99}).run("e", workflow, {})
+    assert result.status == "FAILED"
+    assert "invalid event schema" in result.error
+    verification = DurableExecutor(tmp_path, {}).verify("e")
+    assert verification["status"] == "CORRUPT"
+    assert verification["verified"] is False
+    assert "invalid event schema" in verification["chain_detail"]
+    assert calls == [1]
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload"),
+    [
+        ("ActivityCompleted", {"activity": "f", "result_ref": "0" * 64}),
+        ("SignalReceived", {"name": "go"}),
+        ("StateSnapshot", {"steps": 1}),
+        ("WorkflowCompleted", {}),
+    ],
+)
+def test_missing_replay_event_fields_fail_closed(tmp_path, event_type, payload):
+    calls = []
+
+    def workflow(ctx, inp):
+        return ctx.execute_activity("f")
+
+    ex = DurableExecutor(
+        tmp_path, {"f": lambda p: calls.append(1) or 42}, snapshot_every=1
+    )
+    assert ex.run("e", workflow, {}).status == "COMPLETED"
+    ex.deliver_signal("e", "go", True)
+    with ex.log.db:
+        ex.log.db.execute(
+            "UPDATE events SET data=? WHERE type=?",
+            (json.dumps(payload), event_type),
+        )
+
+    result = DurableExecutor(
+        tmp_path, {"f": lambda p: calls.append(1) or 99}
+    ).run("e", workflow, {})
+    assert result.status == "FAILED"
+    assert "invalid" in result.error and "schema" in result.error
+
+    verification = DurableExecutor(tmp_path, {}).verify("e")
+    assert verification["status"] == "CORRUPT"
+    assert verification["verified"] is False
+    assert "schema" in verification["chain_detail"]
+    assert calls == [1]
+
+
+def test_missing_replay_fields_in_archive_fail_closed(tmp_path):
+    calls = []
+
+    def workflow(ctx, inp):
+        return ctx.execute_activity("f")
+
+    ex = DurableExecutor(
+        tmp_path, {"f": lambda p: calls.append(1) or 42}, snapshot_every=1
+    )
+    assert ex.run("e", workflow, {}).status == "COMPLETED"
+    ex.log.compact()
+    with ex.log.db:
+        ex.log.db.execute(
+            "UPDATE archive SET data=? WHERE type='ActivityCompleted'",
+            (json.dumps({"activity": "f", "result_ref": "0" * 64}),),
+        )
+
+    result = DurableExecutor(
+        tmp_path, {"f": lambda p: calls.append(1) or 99}
+    ).run("e", workflow, {})
+    assert result.status == "FAILED"
+    assert "invalid ActivityCompleted schema" in result.error
+
+    verification = DurableExecutor(tmp_path, {}).verify("e")
+    assert verification["status"] == "CORRUPT"
+    assert verification["verified"] is False
+    assert "invalid ActivityCompleted schema" in verification["chain_detail"]
+    assert calls == [1]
+
+
+def test_corrupt_sqlite_database_fails_closed_in_run_and_verify(tmp_path):
+    def workflow(ctx, inp):
+        return ctx.execute_activity("f")
+
+    ex = DurableExecutor(tmp_path, {"f": lambda p: 42})
+    assert ex.run("e", workflow, {}).status == "COMPLETED"
+    db_path = tmp_path / "executions" / "e" / "events.db"
+    ex.log.db.close()
+    db_path.write_bytes(b"not a sqlite database")
+
+    result = DurableExecutor(tmp_path, {"f": lambda p: 99}).run("e", workflow, {})
+    assert result.status == "FAILED"
+    assert "storage failure" in result.error
+
+    verification = DurableExecutor(tmp_path, {}).verify("e")
+    assert verification["status"] == "CORRUPT"
+    assert verification["verified"] is False
+    assert "invalid SQLite journal" in verification["chain_detail"]
+
+
+def test_unreadable_cas_object_fails_closed_in_verify(tmp_path, monkeypatch):
+    def workflow(ctx, inp):
+        return ctx.execute_activity("f")
+
+    ex = DurableExecutor(tmp_path, {"f": lambda p: 42})
+    assert ex.run("e", workflow, {}).status == "COMPLETED"
+    ref = next(iter(ex._completed.values()))
+
+    original_get_bytes = ex.cas.get_bytes
+
+    def unreadable(target_ref):
+        if target_ref == ref:
+            raise PermissionError("injected unreadable CAS object")
+        return original_get_bytes(target_ref)
+
+    monkeypatch.setattr(ex.cas, "get_bytes", unreadable)
+    result = ex.verify("e")
+    assert result["status"] == "COMPLETED"
+    assert result["artifacts_ok"] is False
+    assert result["bad_artifacts"] == [ref]
+    assert result["verified"] is False

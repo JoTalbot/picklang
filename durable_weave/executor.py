@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 import traceback
@@ -21,7 +22,7 @@ from typing import Any, Callable
 
 from .cas import ContentAddressedStore, canonical_json, sha256_hex
 from .locking import ExecutionBusy, execution_lock
-from .sqlite_backend import SQLiteEventLog
+from .sqlite_backend import JournalCorruptionError, SQLiteEventLog, decode_event
 
 
 class SimulatedCrash(Exception):
@@ -50,6 +51,59 @@ Handler = Callable[[dict[str, Any]], Any]
 def _input_digest(payload: dict) -> str:
     """Хэш входа прямо в событии: отдельный CAS-объект ради digest больше не пишется."""
     return sha256_hex(canonical_json(payload))
+
+def _validate_executor_event(event: dict[str, Any]) -> None:
+    """Validate fields consumed by replay; generic journal event types stay extensible."""
+    typ = event["type"]
+    data = event["data"]
+    # Keep storage validation compatible with historical event payloads.
+    # Legacy parallel ActivityCompleted rows omit "activity"; replay detects
+    # their old step IDs and reports the explicit-migration requirement.
+    # Pre-v1 snapshots omit "steps" and remain recoverable from the journal.
+    required: dict[str, tuple[str, ...]] = {
+        "ActivityCompleted": ("step", "result_ref"),
+        "SignalReceived": ("name", "payload"),
+        "StateSnapshot": ("snapshot_ref",),
+        "WorkflowCompleted": ("output_ref",),
+    }
+    fields = required.get(typ)
+    if fields is None:
+        return
+    missing = [field for field in fields if field not in data]
+    if missing:
+        raise JournalCorruptionError(
+            f"event {event['seq']}: invalid {typ} schema: missing {', '.join(missing)}"
+        )
+    if typ == "ActivityCompleted" and "activity" not in data:
+        step = data.get("step", "")
+        legacy_parallel = (
+            isinstance(step, str) and step.startswith("par")
+            and "." not in step.split(":", 1)[0]
+        )
+        if not legacy_parallel:
+            raise JournalCorruptionError(
+                f"event {event['seq']}: invalid ActivityCompleted schema: missing activity"
+            )
+    for field in ("step", "activity", "name"):
+        if field in data and (not isinstance(data[field], str) or not data[field]):
+            raise JournalCorruptionError(
+                f"event {event['seq']}: invalid {typ} schema: {field} must be non-empty text"
+            )
+    for field in ("result_ref", "snapshot_ref", "output_ref"):
+        if field in data:
+            value = data[field]
+            if (not isinstance(value, str) or len(value) != 64
+                    or any(ch not in "0123456789abcdef" for ch in value)):
+                raise JournalCorruptionError(
+                    f"event {event['seq']}: invalid {typ} schema: {field} must be a SHA-256 digest"
+                )
+    if typ == "StateSnapshot" and "steps" in data and (
+        isinstance(data["steps"], bool) or not isinstance(data["steps"], int) or data["steps"] < 0
+    ):
+        raise JournalCorruptionError(
+            f"event {event['seq']}: invalid StateSnapshot schema: steps must be a non-negative integer"
+        )
+
 
 
 class Context:
@@ -236,6 +290,9 @@ class DurableExecutor:
         self.snapshot_used = False
         self._seq_counter = 0
         events = self.log.events
+        # Validate archived rows too: compaction must not hide malformed replay history.
+        for event in self.log.history():
+            _validate_executor_event(event)
         start = 0
         # П.1: последний снимок даёт completed-карту сразу; обрабатываем только хвост после него
         for i in range(len(events) - 1, -1, -1):
@@ -290,6 +347,11 @@ class DurableExecutor:
                 return self._run_locked(execution_id, workflow, input_, workflow_version)
         except ExecutionBusy as busy:
             return ExecutionResult(execution_id, "BUSY", error=str(busy))
+        except JournalCorruptionError as exc:
+            # Persisted rows are untrusted: invalid JSON and invalid event schemas fail closed.
+            return ExecutionResult(execution_id, "FAILED", error=f"corrupt journal: {exc}")
+        except json.JSONDecodeError as exc:
+            return ExecutionResult(execution_id, "FAILED", error=f"corrupt journal: invalid JSON: {exc}")
         except (sqlite3.Error, OSError) as exc:
             # Не пытаемся записать сообщение об ошибке в уже сломанное хранилище.
             return ExecutionResult(execution_id, "FAILED", error=f"storage failure: {exc}")
@@ -348,12 +410,49 @@ class DurableExecutor:
                     "chain_ok": False, "chain_detail": "execution not found",
                     "artifacts_ok": False, "bad_artifacts": [],
                     "events": 0, "digest": "", "cas": self.cas.stats(), "verified": False}
-        self._load(execution_id)
+        try:
+            self._load(execution_id)
+        except JournalCorruptionError as exc:
+            return {"execution_id": execution_id, "status": "CORRUPT",
+                    "chain_ok": False, "chain_detail": str(exc),
+                    "artifacts_ok": False, "bad_artifacts": [],
+                    "events": 0, "digest": "", "cas": self.cas.stats(),
+                    "verified": False}
+        except json.JSONDecodeError as exc:
+            return {"execution_id": execution_id, "status": "CORRUPT",
+                    "chain_ok": False, "chain_detail": f"invalid JSON: {exc}",
+                    "artifacts_ok": False, "bad_artifacts": [],
+                    "events": 0, "digest": "", "cas": self.cas.stats(),
+                    "verified": False}
+        except (sqlite3.Error, OSError) as exc:
+            return {"execution_id": execution_id, "status": "CORRUPT",
+                    "chain_ok": False, "chain_detail": f"invalid SQLite journal: {exc}",
+                    "artifacts_ok": False, "bad_artifacts": [],
+                    "events": 0, "digest": "", "cas": self.cas.stats(),
+                    "verified": False}
         assert self.log is not None
-        ok, detail = self.log.verify_chain()
+        try:
+            ok, detail = self.log.verify_chain()
+        except JournalCorruptionError as exc:
+            return {"execution_id": execution_id, "status": "CORRUPT",
+                    "chain_ok": False, "chain_detail": str(exc),
+                    "artifacts_ok": False, "bad_artifacts": [],
+                    "events": 0, "digest": "", "cas": self.cas.stats(),
+                    "verified": False}
+        except json.JSONDecodeError as exc:
+            return {"execution_id": execution_id, "status": "CORRUPT",
+                    "chain_ok": False, "chain_detail": f"invalid JSON: {exc}",
+                    "artifacts_ok": False, "bad_artifacts": [],
+                    "events": 0, "digest": "", "cas": self.cas.stats(),
+                    "verified": False}
+        except (sqlite3.Error, OSError) as exc:
+            return {"execution_id": execution_id, "status": "CORRUPT",
+                    "chain_ok": False, "chain_detail": f"invalid SQLite journal: {exc}",
+                    "artifacts_ok": False, "bad_artifacts": [],
+                    "events": 0, "digest": "", "cas": self.cas.stats(),
+                    "verified": False}
         # После compact результаты остаются в archive и/или snapshot.completed.
         # Проверяем все семантические ссылки, а не только output активного окна.
-        import json
         refs: set[str] = set()
         snapshots: set[str] = set()
         tables = ["events"]
@@ -361,14 +460,30 @@ class DurableExecutor:
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='archive'"
         ).fetchone():
             tables.append("archive")
-        for table in tables:
-            for (raw,) in self.log.db.execute(f"SELECT data FROM {table}"):
-                data = json.loads(raw)
-                for key in ("input_ref", "result_ref", "output_ref", "snapshot_ref"):
-                    if data.get(key):
-                        refs.add(data[key])
-                if data.get("snapshot_ref"):
-                    snapshots.add(data["snapshot_ref"])
+        try:
+            for table in tables:
+                for seq, typ, raw, prev, digest in self.log.db.execute(
+                        f"SELECT seq,type,data,prev,hash FROM {table}"):
+                    event = decode_event(seq, typ, raw, prev, digest)
+                    _validate_executor_event(event)
+                    data = event["data"]
+                    for key in ("input_ref", "result_ref", "output_ref", "snapshot_ref"):
+                        if data.get(key):
+                            refs.add(data[key])
+                    if data.get("snapshot_ref"):
+                        snapshots.add(data["snapshot_ref"])
+        except JournalCorruptionError as exc:
+            return {"execution_id": execution_id, "status": "CORRUPT",
+                    "chain_ok": False, "chain_detail": str(exc),
+                    "artifacts_ok": False, "bad_artifacts": [],
+                    "events": 0, "digest": "", "cas": self.cas.stats(),
+                    "verified": False}
+        except (sqlite3.Error, OSError) as exc:
+            return {"execution_id": execution_id, "status": "CORRUPT",
+                    "chain_ok": False, "chain_detail": f"invalid SQLite journal: {exc}",
+                    "artifacts_ok": False, "bad_artifacts": [],
+                    "events": 0, "digest": "", "cas": self.cas.stats(),
+                    "verified": False}
         invalid_snapshots = set()
         for ref in sorted(snapshots):
             try:
