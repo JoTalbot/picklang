@@ -400,22 +400,19 @@ def run_program(source: str, registry: Registry, inputs: dict[str, Any] | None =
                             batch_fn = (body.expr[1], body.expr[1] + ".batch", cand)
                 if batch_fn is not None:
                     items_list = list(items)
-                    if items_list:
-                        name, batch_name, fn = batch_fn
-                        trace.append(batch_name)
-                        args = [_eval(a, env, registry, activity_hook, trace, state) for a in body.expr[2][1:]]
-                        results = fn(items_list, *args)
-                        results = state.charge_call(name, results)
-                        if body.target:
-                            env[body.target] = results
-                            if name in state.untrusted:
-                                state.tainted.add(body.target)
-                        env[step.loop_var] = items_list[-1]
-                    else:
-                        # An empty loop does not execute its body or bind its target.
-                        items = items_list
-                        batch_fn = None
-                if batch_fn is None:
+                    name, batch_name, fn = batch_fn
+                    trace.append(batch_name)
+                    args = [_eval(a, env, registry, activity_hook, trace, state) for a in body.expr[2][1:]]
+                    results = fn(items_list, *args)
+                    results = state.charge_call(name, results)
+                    if body.target:
+                        env[body.target] = results
+                        if name in state.untrusted:
+                            state.tainted.add(body.target)
+                    # Batch loops define the result as [] and the loop variable as
+                    # None for an empty collection, matching the AOT contract.
+                    env[step.loop_var] = items_list[-1] if items_list else None
+                else:
                     for item in items:
                         env[step.loop_var] = item
                         if body.kind in ("assign", "expr"):
