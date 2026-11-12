@@ -23,7 +23,7 @@ or correctness of a remote service's idempotency implementation.
 | Boundary / scenario | Existing evidence | What it establishes | Remaining limitation |
 |---|---|---|---|
 | SQLite batch insert failure | `test_batch_failure_rolls_back_disk_and_memory` | Failed batch does not publish partial rows or mutate in-memory events | Trigger-injected SQL abort, not filesystem/device failure |
-| Parallel frontier commit failure | `test_async_parallel_failure_publishes_no_partial_results` and sync frontier coverage | Frontier results are not partially published | More crash points around CAS writes and commit acknowledgement remain useful |
+| Parallel frontier commit failure | `test_async_parallel_failure_publishes_no_partial_results` (async); sync frontier coverage exercises successful execution only | Async injected commit failure does not publish partial results; sync failure behavior is not yet established | Add deterministic sync commit-failure injection and retain broader crash points around CAS writes and commit acknowledgement |
 | CAS write followed by event append failure | `test_activity_cas_write_before_sqlite_failure_reuses_idempotency_key` | Resume retries with the same idempotency key after an uncommitted activity event | Handler deduplication is simulated in-process |
 | Completion event write failure | `test_failed_completion_write_can_resume_committed_activity` | A committed activity is replayed rather than re-executed | Does not simulate process or host power loss |
 | Corrupt event chain / malformed event data | `test_corrupt_journal_stops_before_handler`, malformed JSON/schema tests | Invalid journal fails closed before another handler call | Does not exhaustively mutate every event field and sequence invariant |
