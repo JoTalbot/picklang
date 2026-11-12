@@ -76,6 +76,19 @@ passes them. Add one regression test per independently observable failure bounda
 
 - Fail one branch before another branch starts; fail after all branches finish but
   before frontier commit; fail during frontier commit.
+- Add the missing **synchronous frontier commit-failure** regression case using a
+  deterministic SQLite `append_many` failure after every handler has completed:
+  - assert the active journal contains zero rows from the failed frontier and the
+    executor's in-memory completed map is unchanged;
+  - reopen the execution and confirm no partial frontier is replayed;
+  - retry the same frontier and assert each handler receives the exact same stable
+    idempotency key as on the failed attempt;
+  - verify the resulting journal order follows declaration order, independent of
+    handler completion order;
+  - account for CAS objects written before the failed journal transaction as
+    unreachable orphans, not committed results.
+- Keep this sync case distinct from the existing async commit-failure test; passing
+  one does not establish the other's behavior.
 - Confirm no partial frontier is visible and retry keys remain stable.
 - Interrupt compensation before the handler, after its external side effect, after
   CAS publication, and after journal commit.
